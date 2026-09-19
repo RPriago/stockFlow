@@ -1,0 +1,57 @@
+# ==========================================
+# Operating System & IDE
+# ==========================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ==========================================
+# AI Agents, Tools & Context Rules (DO NOT COMMIT)
+# ==========================================
+.agents/
+.cursor/
+.superdesign/
+.windsurfrules
+AGENTS.md
+CLAUDE.md
+design-spec.md
+*/AGENTS.md
+*/CLAUDE.md
+
+# ==========================================
+# Backend (Go)
+# ==========================================
+backend/.env
+backend/server
+backend/bin/
+backend/*.exe
+backend/*.exe~
+backend/*.dll
+backend/*.so
+backend/*.dylib
+backend/*.test
+backend/*.out
+backend/*.log
+
+# ==========================================
+# Frontend (Next.js & Node)
+# ==========================================
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/.vercel
+frontend/.env*.local
+frontend/*.tsbuildinfo
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/.pnpm-debug.log*

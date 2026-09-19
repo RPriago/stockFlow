@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-page: #FFFFFF;
+  --color-primary-accent: #7C6EF0;
+  --color-secondary-accent: #C7BFFA;
+  --color-text-main: #1B1B1F;
+  --color-text-muted: #8B8B99;
+  --color-line: #EEEDF5;
+  --color-badge-green-bg: #E4F7EC;
+  --color-badge-green-text: #1FAA59;
+  --color-badge-red-bg: #FBE8EA;
+  --color-badge-red-text: #E0475C;
+
+  --color-indigo-600: #7C6EF0;
+  --color-indigo-700: #6C5CE7;
+  --color-indigo-500: #7C6EF0;
+  --color-indigo-400: #9D93F5;
+  --color-indigo-100: #F4F3FF;
+  --color-indigo-50: #FAF9FF;
+
+  --color-blue-600: #7C6EF0;
+  --color-blue-700: #6C5CE7;
+  --color-blue-500: #7C6EF0;
+  --color-blue-100: #F4F3FF;
+  --color-blue-50: #FAF9FF;
+
+  --color-slate-200: #EEEDF5;
+  --color-slate-100: #F4F3FF;
+  --color-slate-50: #FAF9FD;
+}
+
+:root {
+  --background: #FFFFFF;
+  --foreground: #1B1B1F;
+}
+
+.dark {
+  --background: #0F172A;
+  --foreground: #F8FAFC;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+}
+
+/* Custom subtle scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #C7BFFA transparent;
+}
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #C7BFFA;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #7C6EF0;
+}
