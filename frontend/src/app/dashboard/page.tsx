@@ -169,9 +169,10 @@ export default function DashboardPage() {
   useEffect(() => {
     async function fetchAnalytics() {
       try {
+        const tzOffset = -new Date().getTimezoneOffset();
         const [flowRes, capRes] = await Promise.all([
           api.get<{ points: FlowPoint[] }>(
-            `/inventory/analytics/flow?period=${chartPeriod}&range=${selectedDateRange}`
+            `/inventory/analytics/flow?period=${chartPeriod}&range=${selectedDateRange}&tz_offset=${tzOffset}`
           ),
           api.get<WarehouseCapacityResponse>('/inventory/analytics/capacity'),
         ]);

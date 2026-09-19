@@ -181,8 +181,10 @@ func (h *InventoryHandler) AdjustStock(c *gin.Context) {
 func (h *InventoryHandler) GetStockFlowAnalytics(c *gin.Context) {
 	period := c.DefaultQuery("period", "monthly")
 	rangeParam := c.DefaultQuery("range", "")
+	tzOffsetStr := c.DefaultQuery("tz_offset", "0")
+	tzOffset, _ := strconv.Atoi(tzOffsetStr)
 
-	data, err := h.inventoryService.GetStockFlowAnalytics(c.Request.Context(), period, rangeParam)
+	data, err := h.inventoryService.GetStockFlowAnalytics(c.Request.Context(), period, rangeParam, tzOffset)
 	if err != nil {
 		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to retrieve stock flow analytics", err.Error())
 		return

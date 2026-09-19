@@ -28,7 +28,7 @@ type InventoryService interface {
 	GetInventory(ctx context.Context, params models.InventoryQueryParam) ([]models.InventoryItem, int64, error)
 	GetMovements(ctx context.Context, params models.MovementQueryParam) ([]models.InventoryMovement, int64, error)
 	GetStats(ctx context.Context) (*models.InventoryStatsResponse, error)
-	GetStockFlowAnalytics(ctx context.Context, period, rangeParam string) (*models.StockFlowResponse, error)
+	GetStockFlowAnalytics(ctx context.Context, period, rangeParam string, tzOffset int) (*models.StockFlowResponse, error)
 	GetWarehouseCapacityAnalytics(ctx context.Context) (*models.WarehouseCapacityResponse, error)
 	SeedInitialStock(ctx context.Context) error
 }
@@ -512,28 +512,40 @@ func (s *inventoryService) SeedInitialStock(ctx context.Context) error {
 	return nil
 }
 
-func (s *inventoryService) GetStockFlowAnalytics(ctx context.Context, period, rangeParam string) (*models.StockFlowResponse, error) {
+func (s *inventoryService) GetStockFlowAnalytics(ctx context.Context, period, rangeParam string, tzOffset int) (*models.StockFlowResponse, error) {
 	movements, _, err := s.inventoryRepo.FindMovements(ctx, models.MovementQueryParam{Limit: 1000})
 	if err != nil {
 		return nil, err
 	}
 
 	var points []models.StockFlowPoint
-	now := time.Now()
+	userLoc := time.FixedZone("UserTZ", tzOffset*60)
+	now := time.Now().In(userLoc)
 
 	switch {
 	case rangeParam == "today":
-		// Hourly intervals for today (00:00, 04:00, 08:00, 12:00, 16:00, 20:00)
-		timeSlots := []string{"00:00", "04:00", "08:00", "12:00", "16:00", "20:00"}
+		// Hourly intervals for today (00:00, 04:00, 08:00, 12:00, 16:00, 20:00) with range descriptors
+		timeSlots := []struct {
+			label    string
+			rangeStr string
+		}{
+			{"00:00", "00:00 - 03:59"},
+			{"04:00", "04:00 - 07:59"},
+			{"08:00", "08:00 - 11:59"},
+			{"12:00", "12:00 - 15:59"},
+			{"16:00", "16:00 - 19:59"},
+			{"20:00", "20:00 - 23:59"},
+		}
 		points = make([]models.StockFlowPoint, len(timeSlots))
 		for i, slot := range timeSlots {
-			points[i] = models.StockFlowPoint{Label: slot}
+			points[i] = models.StockFlowPoint{Label: slot.label, Date: slot.rangeStr}
 		}
 
-		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, userLoc)
 		for _, m := range movements {
-			if m.CreatedAt.After(todayStart) {
-				hour := m.CreatedAt.Hour()
+			mTime := m.CreatedAt.In(userLoc)
+			if mTime.After(todayStart) {
+				hour := mTime.Hour()
 				slotIdx := hour / 4
 				if slotIdx >= 0 && slotIdx < len(points) {
 					if m.MovementType == models.MovementTypeStockIn {
@@ -563,7 +575,7 @@ func (s *inventoryService) GetStockFlowAnalytics(ctx context.Context, period, ra
 		}
 
 		for _, m := range movements {
-			dateKey := m.CreatedAt.Format("2006-01-02")
+			dateKey := m.CreatedAt.In(userLoc).Format("2006-01-02")
 			if idx, ok := dayMap[dateKey]; ok {
 				if m.MovementType == models.MovementTypeStockIn {
 					points[idx].Inbound += m.Quantity
@@ -587,7 +599,8 @@ func (s *inventoryService) GetStockFlowAnalytics(ctx context.Context, period, ra
 		}
 		currentYear, currentMonth, _ := now.Date()
 		for _, m := range movements {
-			mYear, mMonth, mDay := m.CreatedAt.Date()
+			mTime := m.CreatedAt.In(userLoc)
+			mYear, mMonth, mDay := mTime.Date()
 			if mYear == currentYear && mMonth == currentMonth {
 				weekIdx := (mDay - 1) / 7
 				if weekIdx > 3 {
@@ -616,7 +629,8 @@ func (s *inventoryService) GetStockFlowAnalytics(ctx context.Context, period, ra
 			{Label: "26-30 d"},
 		}
 		for _, m := range movements {
-			diffDays := int(now.Sub(m.CreatedAt).Hours() / 24)
+			mTime := m.CreatedAt.In(userLoc)
+			diffDays := int(now.Sub(mTime).Hours() / 24)
 			if diffDays >= 0 && diffDays < 30 {
 				bucket := diffDays / 5
 				if bucket >= 0 && bucket < len(points) {
@@ -642,8 +656,9 @@ func (s *inventoryService) GetStockFlowAnalytics(ctx context.Context, period, ra
 
 		currentYear := now.Year()
 		for _, m := range movements {
-			if m.CreatedAt.Year() == currentYear {
-				monthIdx := int(m.CreatedAt.Month()) - 1
+			mTime := m.CreatedAt.In(userLoc)
+			if mTime.Year() == currentYear {
+				monthIdx := int(mTime.Month()) - 1
 				if monthIdx >= 0 && monthIdx < 12 {
 					if m.MovementType == models.MovementTypeStockIn {
 						points[monthIdx].Inbound += m.Quantity
