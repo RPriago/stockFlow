@@ -223,7 +223,6 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
         {/* Search button / input */}
         <div className="relative">
           {showSearch ? (
-            <div className="flex items-center">
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -246,8 +245,6 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder={t('search')}
                 autoFocus
-                onBlur={() => setShowSearch(false)}
-                className="w-44 sm:w-64 pl-9 pr-3 py-1.5 text-xs bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-full text-[#1B1B1F] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]"
                 onKeyDown={(e) => {
                   if (e.key === 'Escape') {
                     setShowSearch(false);
@@ -257,7 +254,6 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
                 className="w-48 sm:w-72 pl-9 pr-8 py-1.5 text-xs bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-full text-[#1B1B1F] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]"
               />
               <Search className="w-3.5 h-3.5 text-[#8B8B99] dark:text-slate-400 absolute left-3 pointer-events-none stroke-[1.8]" />
-            </div>
               <button
                 type="button"
                 onClick={() => {
@@ -271,7 +267,6 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
             </form>
           ) : (
             <button
-              onClick={() => setShowSearch(true)}
               onClick={() => {
                 setShowSearch(true);
                 setTimeout(() => searchInputRef.current?.focus(), 50);

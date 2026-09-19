@@ -212,9 +212,6 @@ export default function ProductsPage() {
       {
         name: `Variant ${prev.length + 1}`,
         sku: formSku ? `${formSku}-V${prev.length + 1}` : '',
-        price: formPrice,
-        cost_price: formCostPrice,
-        min_stock: formMinStock,
         price: '',
         cost_price: formCostPrice !== '' ? formCostPrice : '',
         min_stock: formMinStock !== '' ? formMinStock : 10,
@@ -787,12 +784,10 @@ export default function ProductsPage() {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1.5">
-                    {t('sellingPriceLabel')}
                     {t('sellingPriceLabel')} <span className="text-red-500 font-bold">*</span>
                   </label>
                   <input
                     type="number"
-                    min="0"
                     min="0.01"
                     step="any"
                     required
@@ -805,7 +800,6 @@ export default function ProductsPage() {
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1.5">
-                    {t('costPriceLabel')}
                     {t('costPriceLabel')} <span className="text-red-500 font-bold">*</span>
                   </label>
                   <input
@@ -946,12 +940,10 @@ export default function ProductsPage() {
 
                           <div>
                             <label className="block text-[11px] font-semibold uppercase text-slate-500 mb-1">
-                              Variant Price (IDR)
                               Variant Price (IDR) <span className="text-red-500 font-bold">*</span>
                             </label>
                             <input
                               type="number"
-                              min="0"
                               min="0.01"
                               step="any"
                               required

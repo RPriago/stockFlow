@@ -88,13 +88,11 @@ export default function DashboardPage() {
   const [capacityData, setCapacityData] = useState<WarehouseCapacityResponse | null>(null);
 
   // Interactive Date Range State
-  const [selectedDateRange, setSelectedDateRange] = useState('this_month');
   const [selectedDateRange, setSelectedDateRange] = useState('today');
   const [isDateMenuOpen, setIsDateMenuOpen] = useState(false);
   const dateMenuRef = useRef<HTMLDivElement>(null);
 
   // Interactive Chart Period State
-  const [chartPeriod, setChartPeriod] = useState<'monthly' | 'daily'>('monthly');
   const [chartPeriod, setChartPeriod] = useState<'monthly' | 'daily'>('daily');
   const [hoveredBarIndex, setHoveredBarIndex] = useState<number | null>(null);
 
