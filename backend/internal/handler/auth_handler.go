@@ -49,9 +49,13 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// Set HTTP-only Cookie
+	// Set HTTP-only Cookie (SameSite=None if HTTPS/Secure for cross-domain Vercel <-> Render, else Lax for localhost)
 	cookieMaxAge := h.cfg.JWTExpiryHours * 3600
-	c.SetSameSite(http.SameSiteLaxMode)
+	sameSite := http.SameSiteLaxMode
+	if h.cfg.CookieSecure {
+		sameSite = http.SameSiteNoneMode
+	}
+	c.SetSameSite(sameSite)
 	c.SetCookie(
 		middleware.CookieName,
 		token,
@@ -71,7 +75,11 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 func (h *AuthHandler) Logout(c *gin.Context) {
 	// Clear HTTP-only Cookie
-	c.SetSameSite(http.SameSiteLaxMode)
+	sameSite := http.SameSiteLaxMode
+	if h.cfg.CookieSecure {
+		sameSite = http.SameSiteNoneMode
+	}
+	c.SetSameSite(sameSite)
 	c.SetCookie(
 		middleware.CookieName,
 		"",

@@ -29,9 +29,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (res.success && res.data) {
         setUser(res.data);
       } else {
+        if (typeof window !== 'undefined') localStorage.removeItem('stockflow_token');
         setUser(null);
       }
     } catch {
+      if (typeof window !== 'undefined') localStorage.removeItem('stockflow_token');
       setUser(null);
     } finally {
       setIsLoading(false);
@@ -47,6 +49,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const res = await api.post<LoginResult>('/auth/login', { email, password });
       if (res.success && res.data) {
+        if (res.data.token && typeof window !== 'undefined') {
+          localStorage.setItem('stockflow_token', res.data.token);
+        }
         setUser(res.data.user);
         router.push('/dashboard');
       }
@@ -64,6 +69,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // Ignore error during logout
     } finally {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('stockflow_token');
+      }
       setUser(null);
       setIsLoading(false);
       router.push('/login');

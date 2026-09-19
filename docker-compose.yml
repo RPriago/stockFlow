@@ -1,0 +1,47 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: stockflow-backend
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - MONGO_URI=${MONGO_URI:-mongodb://mongodb:27017}
+      - DB_NAME=${DB_NAME:-stockflow}
+      - JWT_SECRET=${JWT_SECRET:-stockflow-production-secret-key-2026}
+      - JWT_EXPIRY_HOURS=24
+      - COOKIE_SECURE=false
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      - USE_IN_MEMORY_DB=${USE_IN_MEMORY_DB:-false}
+    depends_on:
+      - mongodb
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8080/api/v1}
+    container_name: stockflow-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  mongodb:
+    image: mongo:7.0
+    container_name: stockflow-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    restart: unless-stopped
+
+volumes:
+  mongo_data:

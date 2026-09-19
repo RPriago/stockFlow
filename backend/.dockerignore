@@ -1,0 +1,7 @@
+.env
+server
+bin/
+*.log
+*.test
+.git
+.DS_Store

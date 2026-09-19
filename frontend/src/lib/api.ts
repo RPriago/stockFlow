@@ -22,6 +22,14 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     Accept: 'application/json',
   };
 
+  // Attach Bearer token fallback for seamless cross-domain deployments (e.g. Vercel -> Render)
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('stockflow_token');
+    if (token) {
+      defaultHeaders['Authorization'] = `Bearer ${token}`;
+    }
+  }
+
   const response = await fetch(url, {
     ...options,
     headers: {
