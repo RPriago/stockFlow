@@ -249,22 +249,23 @@ export default function DashboardPage() {
 
     switch (selectedDateRange) {
       case 'today': {
-        // Hourly comparison: last 1 hour vs previous hour
-        currentStart = new Date(now.getTime() - 60 * 60 * 1000);
-        prevStart = new Date(now.getTime() - 120 * 60 * 1000);
-        prevEnd = currentStart;
-        comparisonLabel = t('vsLastHour');
-        break;
-      }
-      case 'last_7d': {
-        // Daily comparison: today vs yesterday
+        // Today vs Yesterday
         currentStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
         prevStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0);
         prevEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59, 999);
         comparisonLabel = t('vsYesterday');
         break;
       }
+      case 'last_7d': {
+        // Last 7 days vs previous 7 days
+        currentStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        prevStart = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+        prevEnd = new Date(currentStart.getTime());
+        comparisonLabel = t('vsPrev7Days');
+        break;
+      }
       case 'this_month': {
+        // This month vs last month
         currentStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
         prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0);
         prevEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
@@ -272,6 +273,7 @@ export default function DashboardPage() {
         break;
       }
       case 'last_30d': {
+        // Last 30 days vs previous 30 days
         currentStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
         prevStart = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
         prevEnd = new Date(currentStart.getTime());
@@ -280,6 +282,7 @@ export default function DashboardPage() {
       }
       case 'all_time':
       default: {
+        // This year vs last year
         currentStart = new Date(now.getFullYear(), 0, 1, 0, 0, 0);
         prevStart = new Date(now.getFullYear() - 1, 0, 1, 0, 0, 0);
         prevEnd = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
@@ -288,30 +291,26 @@ export default function DashboardPage() {
       }
     }
 
-    // 1. Total Catalog Products
-    const prodsInCurrent = productsList.filter((p) => {
-      const d = new Date(p.created_at);
-      return d >= currentStart;
+    // 1. Total Catalog Products (Catalog size and net growth vs baseline)
+    const prodsBeforeCurrent = productsList.filter((p) => {
+      return new Date(p.created_at) < currentStart;
     }).length;
-    const prodsInPrev = productsList.filter((p) => {
-      const d = new Date(p.created_at);
-      return d >= prevStart && d <= prevEnd;
+    const prodsAddedInCurrent = productsList.filter((p) => {
+      return new Date(p.created_at) >= currentStart;
     }).length;
 
     let prodChange = '+0.0%';
     let prodIsPositive = true;
-    if (prodsInPrev > 0) {
-      const pct = ((prodsInCurrent - prodsInPrev) / prodsInPrev) * 100;
-      prodChange = (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
-      prodIsPositive = pct >= 0;
-    } else if (prodsInCurrent > 0) {
-      const base = Math.max(totalProducts - prodsInCurrent, 1);
-      const pct = (prodsInCurrent / base) * 100;
-      prodChange = '+' + pct.toFixed(1) + '%';
+    if (prodsBeforeCurrent > 0) {
+      const pct = (prodsAddedInCurrent / prodsBeforeCurrent) * 100;
+      prodChange = (pct > 0 ? '+' : '') + pct.toFixed(1) + '%';
+      prodIsPositive = true;
+    } else if (prodsAddedInCurrent > 0) {
+      prodChange = '+100.0%';
       prodIsPositive = true;
     }
 
-    // 2. Total Stock on Hand
+    // 2. Total Stock on Hand (Cumulative inventory units and period flow delta)
     const currentStock = invStats ? invStats.total_on_hand : 0;
     const netFlow = flowTotals.inbound - flowTotals.outbound;
     const baselineStock = Math.max(currentStock - netFlow, 1);
@@ -325,17 +324,31 @@ export default function DashboardPage() {
 
     // 3. Low-Stock Alerts
     const lowStockCount = invStats ? invStats.low_stock_items_count : 0;
-    const totalItems = invStats ? invStats.total_items_count : 0;
-    const lowStockRatio = totalItems > 0 ? (lowStockCount / totalItems) * 100 : 0;
-    const isLowStockWarning = lowStockCount > 0;
-    const lowStockChange = isLowStockWarning
-      ? `${lowStockRatio.toFixed(1)}%`
-      : '0.0%';
-    const lowStockLabel = isLowStockWarning
-      ? t('catalogLow')
-      : t('stockHealthy');
+    let lowStockChange = '+0.0%';
+    let lowStockIsPositive = true;
 
-    // 4. Pending Inbound POs
+    if (lowStockCount > 0) {
+      // Estimate baseline low-stock before period based on net dispatch
+      const prevLowStock = Math.max(lowStockCount - (netFlow < 0 ? 1 : 0), 1);
+      const diff = lowStockCount - prevLowStock;
+      if (diff > 0) {
+        const pct = (diff / prevLowStock) * 100;
+        lowStockChange = '+' + pct.toFixed(1) + '%';
+        lowStockIsPositive = false; // alert count increased
+      } else if (diff < 0) {
+        const pct = (Math.abs(diff) / prevLowStock) * 100;
+        lowStockChange = '-' + pct.toFixed(1) + '%';
+        lowStockIsPositive = true; // alert count decreased
+      } else {
+        lowStockChange = '+0.0%';
+        lowStockIsPositive = false;
+      }
+    } else {
+      lowStockChange = '0.0%';
+      lowStockIsPositive = true;
+    }
+
+    // 4. Inbound POs
     const posInCurrent = poList.filter((po) => {
       const d = new Date(po.created_at);
       return d >= currentStart;
@@ -344,6 +357,7 @@ export default function DashboardPage() {
       const d = new Date(po.created_at);
       return d >= prevStart && d <= prevEnd;
     }).length;
+
     let poChange = '+0.0%';
     let poIsPositive = true;
     if (posInPrev > 0) {
@@ -353,11 +367,11 @@ export default function DashboardPage() {
     } else if (posInCurrent > 0) {
       poChange = '+100.0%';
       poIsPositive = true;
-    } else if (poStats && poStats.total_orders > 0 && poStats.pending_orders > 0) {
-      const pct = (poStats.pending_orders / poStats.total_orders) * 100;
-      poChange = pct.toFixed(1) + '%';
-      poIsPositive = true;
     }
+
+    const displayedPOValue = selectedDateRange === 'all_time'
+      ? (poStats?.total_orders ?? poList.length).toString()
+      : posInCurrent.toString();
 
     // 5. Active Outbound Orders
     const sosInCurrent = soList.filter((so) => {
@@ -368,6 +382,7 @@ export default function DashboardPage() {
       const d = new Date(so.created_at);
       return d >= prevStart && d <= prevEnd;
     }).length;
+
     let soChange = '+0.0%';
     let soIsPositive = true;
     if (sosInPrev > 0) {
@@ -377,11 +392,11 @@ export default function DashboardPage() {
     } else if (sosInCurrent > 0) {
       soChange = '+100.0%';
       soIsPositive = true;
-    } else if (soStats && soStats.total_orders > 0 && soStats.pending_fulfillment > 0) {
-      const pct = (soStats.pending_fulfillment / soStats.total_orders) * 100;
-      soChange = pct.toFixed(1) + '%';
-      soIsPositive = true;
     }
+
+    const displayedSOValue = selectedDateRange === 'all_time'
+      ? (soStats?.total_orders ?? soList.length).toString()
+      : sosInCurrent.toString();
 
     return [
       {
@@ -406,14 +421,14 @@ export default function DashboardPage() {
         title: t('kpiLowStock'),
         value: lowStockCount.toString(),
         change: lowStockChange,
-        isPositive: !isLowStockWarning,
-        comparisonLabel: lowStockLabel,
+        isPositive: lowStockIsPositive,
+        comparisonLabel,
         icon: AlertTriangle,
         href: '/inventory',
       },
       {
         title: t('kpiPendingPOs'),
-        value: poStats ? poStats.pending_orders.toString() : '0',
+        value: displayedPOValue,
         change: poChange,
         isPositive: poIsPositive,
         comparisonLabel,
@@ -422,7 +437,7 @@ export default function DashboardPage() {
       },
       {
         title: t('kpiActiveSOs'),
-        value: soStats ? soStats.pending_fulfillment.toString() : '0',
+        value: displayedSOValue,
         change: soChange,
         isPositive: soIsPositive,
         comparisonLabel,
