@@ -5,6 +5,9 @@ WORKDIR /app
 
 RUN apk add --no-cache git ca-certificates
 
+ENV GOPROXY=https://proxy.golang.org,direct
+ENV CGO_ENABLED=0
+
 # Cache Go modules
 COPY go.mod go.sum ./
 RUN go mod download
@@ -13,7 +16,7 @@ RUN go mod download
 COPY . .
 
 # Build statically compiled binary
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /app/server cmd/api/main.go
+RUN GOOS=linux go build -ldflags="-w -s" -o /app/server cmd/api/main.go
 
 # Stage 2: Minimal runtime image
 FROM alpine:3.21
@@ -27,3 +30,4 @@ COPY --from=builder /app/server /app/server
 EXPOSE 8080
 
 CMD ["/app/server"]
+
