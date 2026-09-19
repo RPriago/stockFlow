@@ -32,3 +32,12 @@ export interface UserListResult {
     limit: number;
   };
 }
+
+export interface UpdateUserPayload {
+  name: string;
+  email: string;
+  role: Role;
+  warehouse_id?: string;
+  is_active?: boolean;
+  password?: string;
+}

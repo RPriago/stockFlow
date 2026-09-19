@@ -255,6 +255,14 @@ export const translations = {
     roleSuperAdmin: 'Super Admin',
     roleWarehouseManager: 'Warehouse Manager',
     roleWarehouseStaff: 'Warehouse Staff',
+    modalEditUserTitle: 'Edit User',
+    editUserBtn: 'Save Changes',
+    deleteUserConfirmTitle: 'Delete User',
+    deleteUserConfirmDesc: 'Are you sure you want to delete this user? This action cannot be undone.',
+    newPasswordOptional: 'New Password (leave blank to keep current)',
+    userStatus: 'Account Status',
+    userActive: 'Active',
+    userInactive: 'Inactive',
 
     // Theme & Language
     lightMode: 'Light mode',
@@ -516,6 +524,14 @@ export const translations = {
     roleSuperAdmin: 'Super Admin',
     roleWarehouseManager: 'Manajer Gudang',
     roleWarehouseStaff: 'Staf Gudang',
+    modalEditUserTitle: 'Ubah Data Pengguna',
+    editUserBtn: 'Simpan Perubahan',
+    deleteUserConfirmTitle: 'Hapus Pengguna',
+    deleteUserConfirmDesc: 'Apakah Anda yakin ingin menghapus akun pengguna ini? Tindakan ini tidak dapat dibatalkan.',
+    newPasswordOptional: 'Kata Sandi Baru (kosongkan jika tidak diubah)',
+    userStatus: 'Status Akun',
+    userActive: 'Aktif',
+    userInactive: 'Nonaktif',
 
     // Theme & Language
     lightMode: 'Mode Terang',

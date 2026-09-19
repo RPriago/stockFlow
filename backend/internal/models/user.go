@@ -48,6 +48,15 @@ type LoginRequest struct {
 	Password string `json:"password" binding:"required"`
 }
 
+type UpdateUserRequest struct {
+	Name        string `json:"name" binding:"required,min=2,max=100"`
+	Email       string `json:"email" binding:"required,email"`
+	Role        Role   `json:"role" binding:"required"`
+	WarehouseID string `json:"warehouse_id,omitempty"`
+	IsActive    *bool  `json:"is_active,omitempty"`
+	Password    string `json:"password,omitempty"`
+}
+
 type UserResponse struct {
 	ID          primitive.ObjectID  `json:"id"`
 	Name        string              `json:"name"`

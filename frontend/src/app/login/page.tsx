@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { ApiError } from '@/lib/api';
@@ -221,6 +222,18 @@ export default function LoginPage() {
               </button>
             </div>
           </form>
+
+          <div className="mt-6 pt-5 border-t border-[#EEEDF5] dark:border-slate-800 text-center">
+            <p className="text-xs text-[#8B8B99] dark:text-slate-400">
+              {language === 'id' ? 'Ingin mencoba demo recruiter?' : 'Testing the recruiter demo?'}{' '}
+              <Link
+                href="/register"
+                className="font-semibold text-[#7C6EF0] hover:text-[#6C5CE7] hover:underline"
+              >
+                {language === 'id' ? 'Daftar di sini' : 'Sign up here'}
+              </Link>
+            </p>
+          </div>
         </div>
 
         {/* Clean Footer */}

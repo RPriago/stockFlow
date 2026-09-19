@@ -129,6 +129,7 @@ func main() {
 		authGroup := v1.Group("/auth")
 		{
 			authGroup.POST("/login", authHandler.Login)
+			authGroup.POST("/register", authHandler.PublicRegister)
 			authGroup.POST("/logout", authHandler.Logout)
 
 			// Protected auth routes
@@ -143,9 +144,11 @@ func main() {
 		usersGroup := v1.Group("/users")
 		usersGroup.Use(middleware.AuthMiddleware(cfg))
 		{
-			// Super Admin & Warehouse Manager can list users and create new users
+			// Super Admin & Warehouse Manager can list users; ONLY Super Admin can create, update, delete
 			usersGroup.GET("", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), authHandler.ListUsers)
-			usersGroup.POST("", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), authHandler.RegisterUser)
+			usersGroup.POST("", middleware.RequireRoles(models.RoleSuperAdmin), authHandler.RegisterUser)
+			usersGroup.PUT("/:id", middleware.RequireRoles(models.RoleSuperAdmin), authHandler.UpdateUser)
+			usersGroup.DELETE("/:id", middleware.RequireRoles(models.RoleSuperAdmin), authHandler.DeleteUser)
 		}
 
 		// Products routes
@@ -235,7 +238,7 @@ func main() {
 		{
 			custGroup.GET("", soHandler.ListCustomers)
 			custGroup.GET("/:id", soHandler.GetCustomerByID)
-			custGroup.POST("", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), soHandler.CreateCustomer)
+			custGroup.POST("", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager, models.RoleWarehouseStaff), soHandler.CreateCustomer)
 			custGroup.PUT("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), soHandler.UpdateCustomer)
 			custGroup.DELETE("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), soHandler.DeleteCustomer)
 		}

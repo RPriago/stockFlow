@@ -23,8 +23,11 @@ var (
 type AuthService interface {
 	Login(ctx context.Context, req models.LoginRequest) (*models.User, string, time.Time, error)
 	Register(ctx context.Context, req models.RegisterRequest) (*models.User, error)
+	PublicRegister(ctx context.Context, req models.RegisterRequest) (*models.User, string, time.Time, error)
 	GetCurrentUser(ctx context.Context, userID primitive.ObjectID) (*models.User, error)
 	ListUsers(ctx context.Context, page, limit int64) ([]models.UserResponse, int64, error)
+	UpdateUser(ctx context.Context, currentUserID, targetUserID primitive.ObjectID, req models.UpdateUserRequest) (*models.User, error)
+	DeleteUser(ctx context.Context, currentUserID, targetUserID primitive.ObjectID) error
 	SeedInitialAdmin(ctx context.Context) error
 }
 
@@ -156,4 +159,77 @@ func (s *authService) SeedInitialAdmin(ctx context.Context) error {
 
 	log.Println("Initial Super Admin successfully seeded.")
 	return nil
+}
+
+func (s *authService) PublicRegister(ctx context.Context, req models.RegisterRequest) (*models.User, string, time.Time, error) {
+	// Strictly allow only warehouse_staff and warehouse_manager for public demo testing
+	if req.Role != models.RoleWarehouseStaff && req.Role != models.RoleWarehouseManager {
+		return nil, "", time.Time{}, errors.New("public registration is only available for warehouse_staff and warehouse_manager roles")
+	}
+
+	user, err := s.Register(ctx, req)
+	if err != nil {
+		return nil, "", time.Time{}, err
+	}
+
+	token, expiresAt, err := utils.GenerateJWT(user, s.cfg.JWTSecret, s.cfg.JWTExpiryHours)
+	if err != nil {
+		return nil, "", time.Time{}, err
+	}
+
+	return user, token, expiresAt, nil
+}
+
+func (s *authService) UpdateUser(ctx context.Context, currentUserID, targetUserID primitive.ObjectID, req models.UpdateUserRequest) (*models.User, error) {
+	user, err := s.userRepo.FindByID(ctx, targetUserID)
+	if err != nil {
+		return nil, err
+	}
+
+	if !models.IsValidRole(req.Role) {
+		return nil, ErrInvalidRole
+	}
+
+	user.Name = req.Name
+	user.Email = req.Email
+	user.Role = req.Role
+
+	if req.IsActive != nil {
+		user.IsActive = *req.IsActive
+	}
+
+	if req.WarehouseID != "" {
+		oid, err := primitive.ObjectIDFromHex(req.WarehouseID)
+		if err != nil {
+			return nil, errors.New("invalid warehouse_id format")
+		}
+		user.WarehouseID = &oid
+	} else {
+		user.WarehouseID = nil
+	}
+
+	if req.Password != "" {
+		if len(req.Password) < 6 {
+			return nil, errors.New("password must be at least 6 characters")
+		}
+		hash, err := utils.HashPassword(req.Password)
+		if err != nil {
+			return nil, err
+		}
+		user.PasswordHash = hash
+	}
+
+	if err := s.userRepo.Update(ctx, user); err != nil {
+		return nil, err
+	}
+
+	return user, nil
+}
+
+func (s *authService) DeleteUser(ctx context.Context, currentUserID, targetUserID primitive.ObjectID) error {
+	if currentUserID == targetUserID {
+		return errors.New("you cannot delete your own account")
+	}
+
+	return s.userRepo.Delete(ctx, targetUserID)
 }

@@ -11,6 +11,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  register: (name: string, email: string, password: string, role: Role) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   hasRole: (allowedRoles: Role[]) => boolean;
@@ -62,6 +63,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsLoading(false);
   };
 
+  const register = async (name: string, email: string, password: string, role: Role) => {
+    setIsLoading(true);
+    try {
+      const res = await api.post<LoginResult>('/auth/register', { name, email, password, role });
+      if (res.success && res.data) {
+        if (res.data.token && typeof window !== 'undefined') {
+          localStorage.setItem('stockflow_token', res.data.token);
+        }
+        setUser(res.data.user);
+        router.push('/dashboard');
+      }
+    } catch (err: any) {
+      setIsLoading(false);
+      throw err;
+    }
+    setIsLoading(false);
+  };
+
   const logout = async () => {
     setIsLoading(true);
     try {
@@ -91,6 +110,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isAuthenticated: !!user,
         isLoading,
         login,
+        register,
         logout,
         refreshUser,
         hasRole,

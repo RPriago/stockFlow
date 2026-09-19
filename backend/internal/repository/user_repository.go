@@ -24,6 +24,8 @@ type UserRepository interface {
 	FindByID(ctx context.Context, id primitive.ObjectID) (*models.User, error)
 	FindAll(ctx context.Context, limit, skip int64) ([]models.User, int64, error)
 	Count(ctx context.Context) (int64, error)
+	Update(ctx context.Context, user *models.User) error
+	Delete(ctx context.Context, id primitive.ObjectID) error
 }
 
 type userRepository struct {
@@ -108,4 +110,30 @@ func (r *userRepository) FindAll(ctx context.Context, limit, skip int64) ([]mode
 
 func (r *userRepository) Count(ctx context.Context) (int64, error) {
 	return r.collection.CountDocuments(ctx, bson.M{})
+}
+
+func (r *userRepository) Update(ctx context.Context, user *models.User) error {
+	user.UpdatedAt = time.Now()
+	res, err := r.collection.ReplaceOne(ctx, bson.M{"_id": user.ID}, user)
+	if err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return ErrUserAlreadyExists
+		}
+		return err
+	}
+	if res.MatchedCount == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+func (r *userRepository) Delete(ctx context.Context, id primitive.ObjectID) error {
+	res, err := r.collection.DeleteOne(ctx, bson.M{"_id": id})
+	if err != nil {
+		return err
+	}
+	if res.DeletedCount == 0 {
+		return ErrUserNotFound
+	}
+	return nil
 }

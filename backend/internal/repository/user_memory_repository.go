@@ -5,8 +5,9 @@ import (
 	"sync"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"stockflow-backend/internal/models"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 type userMemoryRepository struct {
@@ -97,4 +98,40 @@ func (r *userMemoryRepository) Count(ctx context.Context) (int64, error) {
 	defer r.mu.RUnlock()
 
 	return int64(len(r.users)), nil
+}
+
+func (r *userMemoryRepository) Update(ctx context.Context, user *models.User) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	existing, exists := r.users[user.ID]
+	if !exists {
+		return ErrUserNotFound
+	}
+
+	// Check if email changed and taken by another user
+	if user.Email != existing.Email {
+		for id, u := range r.users {
+			if id != user.ID && u.Email == user.Email {
+				return ErrUserAlreadyExists
+			}
+		}
+	}
+
+	user.UpdatedAt = time.Now()
+	copied := *user
+	r.users[user.ID] = &copied
+	return nil
+}
+
+func (r *userMemoryRepository) Delete(ctx context.Context, id primitive.ObjectID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.users[id]; !exists {
+		return ErrUserNotFound
+	}
+
+	delete(r.users, id)
+	return nil
 }

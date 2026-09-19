@@ -62,6 +62,7 @@ export default function OutboundOrdersPage() {
   const { user, role } = useAuth();
   const { t, language } = useLanguage();
   const canManage = role === 'super_admin' || role === 'warehouse_manager';
+  const canCreate = role === 'super_admin' || role === 'warehouse_manager' || role === 'warehouse_staff';
 
   // Active Tab: 'orders' or 'customers'
   const [activeTab, setActiveTab] = useState<'orders' | 'customers'>('orders');
@@ -861,7 +862,7 @@ export default function OutboundOrdersPage() {
               <RefreshCw className="w-4 h-4 stroke-[1.8]" />
             </button>
 
-            {canManage && (
+            {canCreate && (
               <button
                 onClick={() => openCreateSOModal()}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#7C6EF0] text-white text-sm font-semibold hover:bg-[#6C5CE7] transition-all shadow-sm shadow-[#7C6EF0]/20 cursor-pointer"
@@ -1078,7 +1079,7 @@ export default function OutboundOrdersPage() {
                       ? (language === 'id' ? 'Coba sesuaikan filter atau kata kunci pencarian Anda.' : 'Try adjusting your filters or search terms.')
                       : (language === 'id' ? 'Buat sales order pertama Anda untuk memulai proses pemenuhan.' : 'Create your first sales order to begin the fulfillment process.')}
                   </p>
-                  {canManage && !searchQuery && !statusFilter && (
+                  {canCreate && !searchQuery && !statusFilter && (
                     <button
                       onClick={() => openCreateSOModal()}
                       className="mt-4 inline-flex items-center px-4 py-2 bg-[#7C6EF0] hover:bg-[#6C5CE7] text-white text-sm font-semibold rounded-xl space-x-2 transition-colors shadow-xs"
@@ -1264,7 +1265,7 @@ export default function OutboundOrdersPage() {
                 />
               </div>
 
-              {canManage && (
+              {canCreate && (
                 <button
                   onClick={() => openCustomerModal()}
                   className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-sm transition-colors space-x-2"
@@ -1353,23 +1354,23 @@ export default function OutboundOrdersPage() {
                           <td className="px-6 py-4 text-right">
                             <div className="flex items-center justify-end space-x-2">
                               {canManage && (
-                                <>
-                                  <button
-                                    onClick={() => openCustomerModal(c)}
-                                    className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
-                                    title={language === 'id' ? 'Ubah Pelanggan' : 'Edit Customer'}
-                                  >
-                                    <Edit2 className="w-4 h-4" />
-                                  </button>
-                                  <button
-                                    onClick={() => openCreateSOModal(c.id)}
-                                    className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-xs font-semibold rounded-lg transition-colors flex items-center space-x-1"
-                                    title={language === 'id' ? 'Buat Sales Order untuk Pelanggan' : 'Issue Sales Order for Customer'}
-                                  >
-                                    <Plus className="w-3.5 h-3.5" />
-                                    <span>{language === 'id' ? 'Buat SO' : 'Create SO'}</span>
-                                  </button>
-                                </>
+                                <button
+                                  onClick={() => openCustomerModal(c)}
+                                  className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
+                                  title={language === 'id' ? 'Ubah Pelanggan' : 'Edit Customer'}
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                              )}
+                              {canCreate && (
+                                <button
+                                  onClick={() => openCreateSOModal(c.id)}
+                                  className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-xs font-semibold rounded-lg transition-colors flex items-center space-x-1"
+                                  title={language === 'id' ? 'Buat Sales Order untuk Pelanggan' : 'Issue Sales Order for Customer'}
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                  <span>{language === 'id' ? 'Buat SO' : 'Create SO'}</span>
+                                </button>
                               )}
                             </div>
                           </td>

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"stockflow-backend/internal/config"
 	"stockflow-backend/internal/middleware"
@@ -164,4 +165,90 @@ func (h *AuthHandler) ListUsers(c *gin.Context) {
 			"limit": limit,
 		},
 	})
+}
+
+func (h *AuthHandler) PublicRegister(c *gin.Context) {
+	var req models.RegisterRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.ValidationErrorResponse(c, err)
+		return
+	}
+
+	user, token, expiresAt, err := h.authService.PublicRegister(c.Request.Context(), req)
+	if err != nil {
+		if errors.Is(err, repository.ErrUserAlreadyExists) {
+			utils.ErrorResponse(c, http.StatusConflict, "User with this email already exists", nil)
+			return
+		}
+		if errors.Is(err, service.ErrInvalidRole) {
+			utils.ErrorResponse(c, http.StatusBadRequest, "Invalid user role specified", nil)
+			return
+		}
+		utils.ErrorResponse(c, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	utils.SuccessResponse(c, http.StatusCreated, "Registration successful", gin.H{
+		"user":       user.ToResponse(),
+		"token":      token,
+		"expires_at": expiresAt.Format(time.RFC3339),
+	})
+}
+
+func (h *AuthHandler) UpdateUser(c *gin.Context) {
+	currentUserIDStr, _ := c.Get(middleware.ContextUserID)
+	currentUserID, _ := primitive.ObjectIDFromHex(currentUserIDStr.(string))
+
+	targetIDStr := c.Param("id")
+	targetID, err := primitive.ObjectIDFromHex(targetIDStr)
+	if err != nil {
+		utils.ErrorResponse(c, http.StatusBadRequest, "Invalid target user ID format", nil)
+		return
+	}
+
+	var req models.UpdateUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.ValidationErrorResponse(c, err)
+		return
+	}
+
+	updatedUser, err := h.authService.UpdateUser(c.Request.Context(), currentUserID, targetID, req)
+	if err != nil {
+		if errors.Is(err, repository.ErrUserNotFound) {
+			utils.ErrorResponse(c, http.StatusNotFound, "User not found", nil)
+			return
+		}
+		if errors.Is(err, repository.ErrUserAlreadyExists) {
+			utils.ErrorResponse(c, http.StatusConflict, "User with this email already exists", nil)
+			return
+		}
+		utils.ErrorResponse(c, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	utils.SuccessResponse(c, http.StatusOK, "User updated successfully", updatedUser.ToResponse())
+}
+
+func (h *AuthHandler) DeleteUser(c *gin.Context) {
+	currentUserIDStr, _ := c.Get(middleware.ContextUserID)
+	currentUserID, _ := primitive.ObjectIDFromHex(currentUserIDStr.(string))
+
+	targetIDStr := c.Param("id")
+	targetID, err := primitive.ObjectIDFromHex(targetIDStr)
+	if err != nil {
+		utils.ErrorResponse(c, http.StatusBadRequest, "Invalid target user ID format", nil)
+		return
+	}
+
+	err = h.authService.DeleteUser(c.Request.Context(), currentUserID, targetID)
+	if err != nil {
+		if errors.Is(err, repository.ErrUserNotFound) {
+			utils.ErrorResponse(c, http.StatusNotFound, "User not found", nil)
+			return
+		}
+		utils.ErrorResponse(c, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	utils.SuccessResponse(c, http.StatusOK, "User deleted successfully", nil)
 }
