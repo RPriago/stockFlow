@@ -288,6 +288,11 @@ export default function DashboardPage() {
                       type="button"
                       onClick={() => {
                         setSelectedDateRange(opt.id);
+                        if (opt.id === 'today' || opt.id === 'last_7d' || opt.id === 'last_30d') {
+                          setChartPeriod('daily');
+                        } else {
+                          setChartPeriod('monthly');
+                        }
                         setIsDateMenuOpen(false);
                       }}
                       className="w-full flex items-center justify-between px-3.5 py-2 text-xs text-left font-medium text-[#1B1B1F] dark:text-slate-200 hover:bg-[#F4F3FF] dark:hover:bg-slate-700/60 hover:text-[#7C6EF0] transition-colors cursor-pointer"
@@ -375,8 +380,10 @@ export default function DashboardPage() {
                 <h2 className="text-base font-bold text-[#1B1B1F] dark:text-white">
                   {t('chartFlowTitle')}
                 </h2>
-                <p className="text-xs text-[#8B8B99] dark:text-slate-400 mt-0.5">
-                  {t('chartFlowSubtitle')}
+                <p className="text-xs text-[#8B8B99] dark:text-slate-400 mt-0.5 flex items-center gap-1.5">
+                  <span>{t('chartFlowSubtitle')}</span>
+                  <span>•</span>
+                  <span className="font-medium text-[#7C6EF0] dark:text-[#9D93F5]">{selectedDateLabel}</span>
                 </p>
               </div>
 

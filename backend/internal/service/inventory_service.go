@@ -521,7 +521,35 @@ func (s *inventoryService) GetStockFlowAnalytics(ctx context.Context, period, ra
 	var points []models.StockFlowPoint
 	now := time.Now()
 
-	if period == "daily" || rangeParam == "7d" {
+	switch {
+	case rangeParam == "today":
+		// Hourly intervals for today (00:00, 04:00, 08:00, 12:00, 16:00, 20:00)
+		timeSlots := []string{"00:00", "04:00", "08:00", "12:00", "16:00", "20:00"}
+		points = make([]models.StockFlowPoint, len(timeSlots))
+		for i, slot := range timeSlots {
+			points[i] = models.StockFlowPoint{Label: slot}
+		}
+
+		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		for _, m := range movements {
+			if m.CreatedAt.After(todayStart) {
+				hour := m.CreatedAt.Hour()
+				slotIdx := hour / 4
+				if slotIdx >= 0 && slotIdx < len(points) {
+					if m.MovementType == models.MovementTypeStockIn {
+						points[slotIdx].Inbound += m.Quantity
+					} else if m.MovementType == models.MovementTypeStockOut {
+						qty := m.Quantity
+						if qty < 0 {
+							qty = -qty
+						}
+						points[slotIdx].Outbound += qty
+					}
+				}
+			}
+		}
+
+	case rangeParam == "last_7d" || rangeParam == "7d" || (period == "daily" && rangeParam != "this_month" && rangeParam != "all_time"):
 		// Last 7 days
 		points = make([]models.StockFlowPoint, 7)
 		dayMap := make(map[string]int)
@@ -548,8 +576,64 @@ func (s *inventoryService) GetStockFlowAnalytics(ctx context.Context, period, ra
 				}
 			}
 		}
-	} else {
-		// Monthly (12 months of current year)
+
+	case rangeParam == "this_month":
+		// 4 Weeks of current month
+		points = []models.StockFlowPoint{
+			{Label: "Week 1"},
+			{Label: "Week 2"},
+			{Label: "Week 3"},
+			{Label: "Week 4"},
+		}
+		currentYear, currentMonth, _ := now.Date()
+		for _, m := range movements {
+			mYear, mMonth, mDay := m.CreatedAt.Date()
+			if mYear == currentYear && mMonth == currentMonth {
+				weekIdx := (mDay - 1) / 7
+				if weekIdx > 3 {
+					weekIdx = 3
+				}
+				if m.MovementType == models.MovementTypeStockIn {
+					points[weekIdx].Inbound += m.Quantity
+				} else if m.MovementType == models.MovementTypeStockOut {
+					qty := m.Quantity
+					if qty < 0 {
+						qty = -qty
+					}
+					points[weekIdx].Outbound += qty
+				}
+			}
+		}
+
+	case rangeParam == "last_30d" || rangeParam == "30d":
+		// Group into 6 5-day intervals
+		points = []models.StockFlowPoint{
+			{Label: "1-5 d"},
+			{Label: "6-10 d"},
+			{Label: "11-15 d"},
+			{Label: "16-20 d"},
+			{Label: "21-25 d"},
+			{Label: "26-30 d"},
+		}
+		for _, m := range movements {
+			diffDays := int(now.Sub(m.CreatedAt).Hours() / 24)
+			if diffDays >= 0 && diffDays < 30 {
+				bucket := diffDays / 5
+				if bucket >= 0 && bucket < len(points) {
+					if m.MovementType == models.MovementTypeStockIn {
+						points[bucket].Inbound += m.Quantity
+					} else if m.MovementType == models.MovementTypeStockOut {
+						qty := m.Quantity
+						if qty < 0 {
+							qty = -qty
+						}
+						points[bucket].Outbound += qty
+					}
+				}
+			}
+		}
+
+	default: // "all_time" or "monthly"
 		months := []string{"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
 		points = make([]models.StockFlowPoint, 12)
 		for i, mName := range months {

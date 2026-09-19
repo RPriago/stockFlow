@@ -4,9 +4,10 @@ import (
 	"strings"
 	"time"
 
+	"stockflow-backend/internal/config"
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"stockflow-backend/internal/config"
 )
 
 func CORSMiddleware(cfg *config.Config) gin.HandlerFunc {
