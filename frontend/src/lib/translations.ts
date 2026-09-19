@@ -79,6 +79,12 @@ export const translations = {
     kpiPendingPOs: 'Pending Inbound POs',
     kpiActiveSOs: 'Active Outbound Orders',
     vsLastMonth: 'vs last month',
+    vsYesterday: 'vs yesterday',
+    vsPrev7Days: 'vs prev 7 days',
+    vsPrev30Days: 'vs prev 30 days',
+    vsLastYear: 'vs last year',
+    catalogLow: 'of catalog low',
+    stockHealthy: 'healthy stock',
 
     // Stock Flow Chart
     chartFlowTitle: 'Inventory Stock Flow: Inbound vs Outbound',
@@ -348,6 +354,12 @@ export const translations = {
     kpiPendingPOs: 'Menunggu PO Masuk',
     kpiActiveSOs: 'Pesanan Keluar Aktif',
     vsLastMonth: 'vs bulan lalu',
+    vsYesterday: 'vs kemarin',
+    vsPrev7Days: 'vs 7h sebelumnya',
+    vsPrev30Days: 'vs 30h sebelumnya',
+    vsLastYear: 'vs tahun lalu',
+    catalogLow: 'katalog menipis',
+    stockHealthy: 'stok aman',
 
     // Stock Flow Chart
     chartFlowTitle: 'Arus Pergerakan Stok: Masuk vs Keluar',

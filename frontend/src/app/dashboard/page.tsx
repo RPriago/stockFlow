@@ -1,14 +1,18 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { api } from '@/lib/api';
 import { ProductListResult } from '@/types/product';
+import { Product, ProductListResult } from '@/types/product';
 import { InventoryStats } from '@/types/inventory';
 import { POStats } from '@/types/po';
 import { SOStats } from '@/types/so';
+import { POStats, PurchaseOrder } from '@/types/po';
+import { SOStats, SalesOrder } from '@/types/so';
 import {
   Package,
   Boxes,
@@ -83,6 +87,12 @@ export default function DashboardPage() {
   const [soStats, setSoStats] = useState<SOStats | null>(null);
   const [movements, setMovements] = useState<RecentMovement[]>([]);
 
+  // Detailed lists for dynamic KPI velocity calculation
+  const [productsList, setProductsList] = useState<Product[]>([]);
+  const [poList, setPoList] = useState<PurchaseOrder[]>([]);
+  const [soList, setSoList] = useState<SalesOrder[]>([]);
+  const [flowTotals, setFlowTotals] = useState<{ inbound: number; outbound: number }>({ inbound: 0, outbound: 0 });
+
   // Real Analytics States
   const [flowPoints, setFlowPoints] = useState<FlowPoint[]>([]);
   const [capacityData, setCapacityData] = useState<WarehouseCapacityResponse | null>(null);
@@ -121,14 +131,20 @@ export default function DashboardPage() {
       try {
         const [prodRes, invRes, poRes, soRes, movRes] = await Promise.all([
           api.get<ProductListResult>('/products?page=1&limit=1'),
+        const [prodRes, invRes, poRes, soRes, movRes, poListRes, soListRes] = await Promise.all([
+          api.get<ProductListResult>('/products?page=1&limit=200'),
           api.get<InventoryStats>('/inventory/stats'),
           api.get<POStats>('/purchase-orders/stats'),
           api.get<SOStats>('/sales-orders/stats'),
           api.get<{ movements: InventoryMovement[] }>('/inventory/movements?page=1&limit=6'),
+          api.get<{ orders: PurchaseOrder[] }>('/purchase-orders?page=1&limit=200'),
+          api.get<{ orders: SalesOrder[] }>('/sales-orders?page=1&limit=200'),
         ]);
 
         if (prodRes.success && prodRes.data) {
           setTotalProducts(prodRes.data.meta.total);
+          setTotalProducts(prodRes.data.meta?.total ?? prodRes.data.products?.length ?? 0);
+          setProductsList(prodRes.data.products || []);
         }
         if (invRes.success && invRes.data) {
           setInvStats(invRes.data);
@@ -138,6 +154,12 @@ export default function DashboardPage() {
         }
         if (soRes.success && soRes.data) {
           setSoStats(soRes.data);
+        }
+        if (poListRes.success && poListRes.data?.orders) {
+          setPoList(poListRes.data.orders);
+        }
+        if (soListRes.success && soListRes.data?.orders) {
+          setSoList(soListRes.data.orders);
         }
         if (movRes.success && movRes.data?.movements) {
           const mapped: RecentMovement[] = movRes.data.movements.map((m, index) => ({
@@ -163,6 +185,18 @@ export default function DashboardPage() {
     }
 
     loadStats();
+
+    const handleRefresh = () => {
+      loadStats();
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('stockflow-notification-refresh', handleRefresh);
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('stockflow-notification-refresh', handleRefresh);
+      }
+    };
   }, []);
 
   // Fetch Dynamic Analytics (Stock Flow & Capacity)
@@ -172,6 +206,7 @@ export default function DashboardPage() {
         const tzOffset = -new Date().getTimezoneOffset();
         const [flowRes, capRes] = await Promise.all([
           api.get<{ points: FlowPoint[] }>(
+          api.get<{ points: FlowPoint[]; total_inbound?: number; total_outbound?: number }>(
             `/inventory/analytics/flow?period=${chartPeriod}&range=${selectedDateRange}&tz_offset=${tzOffset}`
           ),
           api.get<WarehouseCapacityResponse>('/inventory/analytics/capacity'),
@@ -179,8 +214,13 @@ export default function DashboardPage() {
 
         if (flowRes.success && flowRes.data?.points) {
           setFlowPoints(flowRes.data.points);
+          setFlowTotals({
+            inbound: flowRes.data.total_inbound ?? 0,
+            outbound: flowRes.data.total_outbound ?? 0,
+          });
         } else {
           setFlowPoints([]);
+          setFlowTotals({ inbound: 0, outbound: 0 });
         }
 
         if (capRes.success && capRes.data) {
@@ -251,6 +291,208 @@ export default function DashboardPage() {
       href: '/outbound-orders',
     },
   ];
+  // Dynamic KPI calculations based on real records and date range comparison
+  const metrics = useMemo(() => {
+    const now = new Date();
+    let currentStart: Date;
+    let prevStart: Date;
+    let prevEnd: Date;
+    let comparisonLabel: string;
+
+    switch (selectedDateRange) {
+      case 'today': {
+        currentStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+        prevStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0);
+        prevEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59, 999);
+        comparisonLabel = t('vsYesterday');
+        break;
+      }
+      case 'last_7d': {
+        currentStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        prevStart = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+        prevEnd = new Date(currentStart.getTime());
+        comparisonLabel = t('vsPrev7Days');
+        break;
+      }
+      case 'this_month': {
+        currentStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+        prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0);
+        prevEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+        comparisonLabel = t('vsLastMonth');
+        break;
+      }
+      case 'last_30d': {
+        currentStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        prevStart = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+        prevEnd = new Date(currentStart.getTime());
+        comparisonLabel = t('vsPrev30Days');
+        break;
+      }
+      case 'all_time':
+      default: {
+        currentStart = new Date(now.getFullYear(), 0, 1, 0, 0, 0);
+        prevStart = new Date(now.getFullYear() - 1, 0, 1, 0, 0, 0);
+        prevEnd = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
+        comparisonLabel = t('vsLastYear');
+        break;
+      }
+    }
+
+    // 1. Total Catalog Products
+    const prodsInCurrent = productsList.filter((p) => {
+      const d = new Date(p.created_at);
+      return d >= currentStart;
+    }).length;
+    const prodsInPrev = productsList.filter((p) => {
+      const d = new Date(p.created_at);
+      return d >= prevStart && d <= prevEnd;
+    }).length;
+
+    let prodChange = '+0.0%';
+    let prodIsPositive = true;
+    if (prodsInPrev > 0) {
+      const pct = ((prodsInCurrent - prodsInPrev) / prodsInPrev) * 100;
+      prodChange = (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
+      prodIsPositive = pct >= 0;
+    } else if (prodsInCurrent > 0) {
+      const base = Math.max(totalProducts - prodsInCurrent, 1);
+      const pct = (prodsInCurrent / base) * 100;
+      prodChange = '+' + pct.toFixed(1) + '%';
+      prodIsPositive = true;
+    }
+
+    // 2. Total Stock on Hand
+    const currentStock = invStats ? invStats.total_on_hand : 0;
+    const netFlow = flowTotals.inbound - flowTotals.outbound;
+    const baselineStock = Math.max(currentStock - netFlow, 1);
+    let stockChange = '+0.0%';
+    let stockIsPositive = true;
+    if (currentStock > 0 && netFlow !== 0) {
+      const pct = (netFlow / baselineStock) * 100;
+      stockChange = (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
+      stockIsPositive = pct >= 0;
+    }
+
+    // 3. Low-Stock Alerts
+    const lowStockCount = invStats ? invStats.low_stock_items_count : 0;
+    const totalItems = invStats ? invStats.total_items_count : 0;
+    const lowStockRatio = totalItems > 0 ? (lowStockCount / totalItems) * 100 : 0;
+    const isLowStockWarning = lowStockCount > 0;
+    const lowStockChange = isLowStockWarning
+      ? `${lowStockRatio.toFixed(1)}%`
+      : '0.0%';
+    const lowStockLabel = isLowStockWarning
+      ? t('catalogLow')
+      : t('stockHealthy');
+
+    // 4. Pending Inbound POs
+    const posInCurrent = poList.filter((po) => {
+      const d = new Date(po.created_at);
+      return d >= currentStart;
+    }).length;
+    const posInPrev = poList.filter((po) => {
+      const d = new Date(po.created_at);
+      return d >= prevStart && d <= prevEnd;
+    }).length;
+    let poChange = '+0.0%';
+    let poIsPositive = true;
+    if (posInPrev > 0) {
+      const pct = ((posInCurrent - posInPrev) / posInPrev) * 100;
+      poChange = (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
+      poIsPositive = pct >= 0;
+    } else if (posInCurrent > 0) {
+      poChange = '+100.0%';
+      poIsPositive = true;
+    } else if (poStats && poStats.total_orders > 0 && poStats.pending_orders > 0) {
+      const pct = (poStats.pending_orders / poStats.total_orders) * 100;
+      poChange = pct.toFixed(1) + '%';
+      poIsPositive = true;
+    }
+
+    // 5. Active Outbound Orders
+    const sosInCurrent = soList.filter((so) => {
+      const d = new Date(so.created_at);
+      return d >= currentStart;
+    }).length;
+    const sosInPrev = soList.filter((so) => {
+      const d = new Date(so.created_at);
+      return d >= prevStart && d <= prevEnd;
+    }).length;
+    let soChange = '+0.0%';
+    let soIsPositive = true;
+    if (sosInPrev > 0) {
+      const pct = ((sosInCurrent - sosInPrev) / sosInPrev) * 100;
+      soChange = (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
+      soIsPositive = pct >= 0;
+    } else if (sosInCurrent > 0) {
+      soChange = '+100.0%';
+      soIsPositive = true;
+    } else if (soStats && soStats.total_orders > 0 && soStats.pending_fulfillment > 0) {
+      const pct = (soStats.pending_fulfillment / soStats.total_orders) * 100;
+      soChange = pct.toFixed(1) + '%';
+      soIsPositive = true;
+    }
+
+    return [
+      {
+        title: t('kpiTotalProducts'),
+        value: totalProducts.toString(),
+        change: prodChange,
+        isPositive: prodIsPositive,
+        comparisonLabel,
+        icon: Package,
+        href: '/products',
+      },
+      {
+        title: t('kpiTotalStock'),
+        value: invStats ? invStats.total_on_hand.toLocaleString() : '0',
+        change: stockChange,
+        isPositive: stockIsPositive,
+        comparisonLabel,
+        icon: Boxes,
+        href: '/inventory',
+      },
+      {
+        title: t('kpiLowStock'),
+        value: lowStockCount.toString(),
+        change: lowStockChange,
+        isPositive: !isLowStockWarning,
+        comparisonLabel: lowStockLabel,
+        icon: AlertTriangle,
+        href: '/inventory',
+      },
+      {
+        title: t('kpiPendingPOs'),
+        value: poStats ? poStats.pending_orders.toString() : '0',
+        change: poChange,
+        isPositive: poIsPositive,
+        comparisonLabel,
+        icon: ArrowDownLeft,
+        href: '/purchase-orders',
+      },
+      {
+        title: t('kpiActiveSOs'),
+        value: soStats ? soStats.pending_fulfillment.toString() : '0',
+        change: soChange,
+        isPositive: soIsPositive,
+        comparisonLabel,
+        icon: ArrowUpRight,
+        href: '/outbound-orders',
+      },
+    ];
+  }, [
+    totalProducts,
+    invStats,
+    poStats,
+    soStats,
+    productsList,
+    poList,
+    soList,
+    flowTotals,
+    selectedDateRange,
+    language,
+    t,
+  ]);
 
   return (
     <DashboardLayout>
@@ -367,6 +609,7 @@ export default function DashboardPage() {
                   {m.change}
                 </span>
                 <span className="text-xs text-[#8B8B99] dark:text-slate-400">vs last month</span>
+                <span className="text-xs text-[#8B8B99] dark:text-slate-400">{m.comparisonLabel}</span>
               </div>
             </Link>
           ))}
