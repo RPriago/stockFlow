@@ -1,247 +1,186 @@
-<div align="center">
+# StockFlow — Warehouse Management System
 
-# 📦 StockFlow — Warehouse Management System (WMS)
+[![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat-square&logo=go&logoColor=white)](https://golang.org)
+[![Next.js](https://img.shields.io/badge/Next.js-16.3-black?style=flat-square&logo=next.js&logoColor=white)](https://nextjs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248?style=flat-square&logo=mongodb&logoColor=white)](https://www.mongodb.com)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 
-**A high-performance, enterprise-grade, distributed Warehouse Management System built with Golang and Next.js.**
-
-[![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://golang.org)
-[![Next.js](https://img.shields.io/badge/Next.js-16.3-black?style=for-the-badge&logo=next.js&logoColor=white)](https://nextjs.org)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4.0-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white)](https://tailwindcss.com)
-[![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248?style=for-the-badge&logo=mongodb&logoColor=white)](https://www.mongodb.com)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
-
-<p align="center">
-  <a href="#-key-features">Key Features</a> •
-  <a href="#-system-architecture">System Architecture</a> •
-  <a href="#-business-workflow">Business Workflow</a> •
-  <a href="#-high-performance-caching-engine">Caching Engine</a> •
-  <a href="#-chaos-testing--performance-benchmarks">Testing & Benchmarks</a> •
-  <a href="#-getting-started">Getting Started</a>
-</p>
-
-</div>
+[Features](#features) • [Architecture](#system-architecture) • [Workflow](#business-workflow) • [Caching](#caching-layer) • [Benchmarks](#load-testing--benchmarks) • [Getting Started](#getting-started)
 
 ---
 
-## 🌟 Overview
+## Overview
 
-**StockFlow** is a modern Warehouse Management System designed to handle high-throughput supply chain operations with zero-compromise data consistency. It provides real-time multi-warehouse oversight, granular storage bin tracking, automated purchase order procurement, intelligent stock reservations, and streamlined outbound sales order fulfillment.
+StockFlow is a warehouse management system for tracking inventory across multiple warehouses, from incoming purchase orders to outgoing sales order fulfillment. It's built with a layered architecture (controller → service → repository) on the backend, with an in-memory caching layer, transaction-safe stock updates to prevent overselling, and role-based access control for different warehouse roles.
 
-Built on top of a **Clean Layered Architecture (Controller-Service-Repository)**, StockFlow delivers sub-millisecond response times through an intelligent **Concurrent Read-Through Memory Cache**, transactional race condition guards, and enterprise-grade **Role-Based Access Control (RBAC)**.
+I built this to practice designing a backend that handles concurrent writes correctly (stock levels being the classic case where race conditions cause real bugs), not just to CRUD data around.
 
----
+## Features
 
-## 🚀 Key Features
+* **Multi-warehouse & bin tracking** — hierarchical location model (`Warehouse → Zone → Rack → Shelf → Bin`) with capacity limits per bin.
+* **Stock movement ledger** — every stock change (`IN`, `OUT`, `ADJUST`, `TRANSFER`, `RESERVE`) is logged with a reference ID, so stock levels can always be traced back to the transaction that caused them.
+* **Concurrency-safe stock updates** — stock decrements are guarded transactionally so concurrent orders can't push a balance below zero, even under load (see benchmarks below).
+* **Purchase order lifecycle** — `Draft → Ordered → Received`, with bin allocation on intake.
+* **Sales order lifecycle** — `Pending → Confirmed → Picking → Packing → Shipped → Delivered`, with automatic stock reservation on confirmation.
+* **Role-based access control** — Super Admin, Warehouse Manager, and Warehouse Staff roles, enforced via JWT stored in HTTP-only cookies.
+* **In-memory caching layer** — read-heavy endpoints are served from an in-memory cache with automatic invalidation on writes.
+* **In-memory DB fallback mode** — the app can run against a simulated in-memory store instead of MongoDB, useful for local testing or a demo without needing a real database.
 
-* **Multi-Warehouse & 3D Bin Grid Tracking**: Hierarchical facility modeling (`Warehouse → Zone → Rack → Shelf → Bin Slot`) with dynamic storage capacity limits and visual allocation tracking.
-* **Double-Entry Stock Movement Ledger**: Immutable audit log of every stock transaction (`IN`, `OUT`, `ADJUST`, `TRANSFER`, `RESERVE`) with cryptographically secure reference hashes.
-* **Atomic Race Condition & Overdraft Prevention**: Enforces strict transactional safety against negative stock balance even under massive concurrent surges.
-* **Purchase Order (PO) Intake Lifecycle**: End-to-end procurement workflow (`Draft → Ordered → Received`) with automatic bin allocation and instant quantity updates.
-* **Sales Order (SO) Fulfillment Pipeline**: Order management through strict sequential state transitions (`Pending → Confirmed → Picking → Packing → Shipped → Delivered`) with automated stock reservations.
-* **Role-Based Access Control (RBAC)**: Fine-grained permissions for Super Admin, Warehouse Manager, and Warehouse Staff with secure HTTP-only JWT cookies.
-* **High-Performance In-Memory Caching Engine**: Smart in-memory cache middleware with microsecond read latency and automatic write-invalidation.
-* **Graceful Degradation & In-Memory Fallback**: Built-in in-memory database simulation allowing testing and offline operation without an external database instance.
+## System Architecture
 
----
-
-## 🏗️ System Architecture
-
-StockFlow follows the industry-standard **Layered Clean Architecture** pattern, enforcing strict separation of concerns, high testability, and decoupled business logic:
+Layered architecture separating HTTP handling, business logic, and data access:
 
 ```mermaid
 flowchart TD
-    subgraph ClientLayer ["Client Layer (Presentation)"]
-        UI["Next.js 16 App Router (React, Tailwind CSS v4)"]
-        State["Auth & Global State Context"]
-        ApiClient["Axios / Fetch Client with HTTP-only Cookies"]
+    subgraph ClientLayer ["Client (Next.js)"]
+        UI["Next.js 16 App Router"]
+        State["Auth & Global State"]
+        ApiClient["Fetch client, HTTP-only cookies"]
         UI --> State --> ApiClient
     end
 
-    subgraph SecurityGateway ["API Gateway & Middleware Layer"]
-        CORS["CORS Handler"]
-        AuthMiddleware["JWT Authentication & RBAC Guard"]
-        CacheMiddleware["Smart Memory Cache (sync.RWMutex)"]
+    subgraph Gateway ["Middleware Layer"]
+        CORS["CORS"]
+        AuthMiddleware["JWT Auth + RBAC Guard"]
+        CacheMiddleware["In-memory Cache (sync.RWMutex)"]
         CORS --> AuthMiddleware --> CacheMiddleware
     end
 
-    subgraph BackendCore ["Backend Core (Golang Gin)"]
-        Handlers["HTTP Handlers / Controllers"]
-        Services["Business Services (Transaction & Validation Engine)"]
-        Repos["Repository Interfaces (Data Abstraction)"]
-        
-        Handlers --> Services
-        Services --> Repos
+    subgraph BackendCore ["Backend (Go + Gin)"]
+        Handlers["HTTP Handlers"]
+        Services["Business Logic"]
+        Repos["Repository Interfaces"]
+        Handlers --> Services --> Repos
     end
 
-    subgraph StorageLayer ["Persistence & Storage Layer"]
-        MongoDB[("MongoDB Atlas Distributed Cluster")]
-        MemRepo[("In-Memory Fallback Engine")]
-        
+    subgraph StorageLayer ["Storage"]
+        MongoDB[("MongoDB Atlas")]
+        MemRepo[("In-memory fallback")]
         Repos -. Production .-> MongoDB
-        Repos -. Fallback / Test .-> MemRepo
+        Repos -. Testing/offline .-> MemRepo
     end
 
-    ApiClient ==>|"RESTful JSON (HTTPS)"| SecurityGateway
-    CacheMiddleware ==>|"Cache Miss / Mutation"| Handlers
-    CacheMiddleware -.->|"Sub-ms Cache Hit"| ApiClient
+    ApiClient ==>|"REST / JSON"| Gateway
+    CacheMiddleware ==>|"Cache miss or mutation"| Handlers
+    CacheMiddleware -.->|"Cache hit"| ApiClient
 ```
 
----
+## Business Workflow
 
-## 🔄 Business Workflow
-
-The supply chain lifecycle in StockFlow seamlessly bridges inbound procurement and outbound customer fulfillment:
+How inbound procurement and outbound fulfillment connect through the shared inventory balance:
 
 ```mermaid
 flowchart LR
-    subgraph INBOUND ["Inbound Procurement"]
-        PO1["1. Create Purchase Order"] --> PO2["2. Send to Supplier"]
-        PO2 --> PO3["3. Goods Intake & Quality Check"]
-        PO3 --> PO4["4. Assign to Bin Location"]
+    subgraph INBOUND ["Inbound"]
+        PO1["Create PO"] --> PO2["Send to supplier"]
+        PO2 --> PO3["Goods intake & check"]
+        PO3 --> PO4["Assign bin location"]
     end
 
-    subgraph CORE ["Inventory Balance Engine"]
-        PO4 ==>|"Atomic Stock IN"| INV[("Warehouse Inventory Balances & Audit Ledger")]
-        INV ==>|"Stock Reservation"| SO2
+    subgraph CORE ["Inventory Balance"]
+        PO4 ==>|"Stock IN"| INV[("Inventory balances + ledger")]
+        INV ==>|"Reservation"| SO2
     end
 
-    subgraph OUTBOUND ["Outbound Fulfillment"]
-        SO1["1. Sales Order Received"] --> SO2["2. Confirm Order & Reserve Stock"]
-        SO2 --> SO3["3. Pick Items from Specific Bins"]
-        SO3 --> SO4["4. Pack & Quality Seal"]
-        SO4 --> SO5["5. Dispatch with Courier Tracking"]
-        SO5 --> SO6["6. Delivered to Customer"]
+    subgraph OUTBOUND ["Outbound"]
+        SO1["Sales order received"] --> SO2["Confirm & reserve stock"]
+        SO2 --> SO3["Pick from bin"]
+        SO3 --> SO4["Pack"]
+        SO4 --> SO5["Dispatch"]
+        SO5 --> SO6["Delivered"]
     end
 ```
 
----
+## Role-Based Access Control
 
-## 👥 Role-Based Access Control (RBAC)
-
-| Role | Scope & Privileges | Accessible Modules |
+| Role | Scope | Accessible Modules |
 | :--- | :--- | :--- |
-| **Super Admin** | Full root access across all warehouses, user administration, system settings, inventory adjustments, and chaos telemetry | `All Modules`, `User Management`, `System Audits` |
-| **Warehouse Manager** | Warehouse supervision, bin allocation, purchase order approvals, sales order management, and stock adjustments | `Dashboard`, `Inventory`, `Warehouses`, `PO`, `SO`, `Products` |
-| **Warehouse Staff** | On-the-ground warehouse operations, goods intake, barcode scanning, order picking, and packing dispatch | `Inventory (Read/Move)`, `PO (Intake)`, `SO (Pick/Pack)` |
+| **Super Admin** | Full access across all warehouses, user management, system settings | All modules, user management |
+| **Warehouse Manager** | Bin allocation, PO approvals, SO management, stock adjustments | Dashboard, inventory, warehouses, PO, SO, products |
+| **Warehouse Staff** | Day-to-day operations: intake, picking, packing | Inventory (read/move), PO (intake), SO (pick/pack) |
 
----
+## Caching Layer
 
-## ⚡ High-Performance Caching Engine
+A small in-memory cache middleware (`backend/internal/middleware/cache.go`), written directly in Go rather than pulling in Redis for a project this size:
 
-StockFlow features a specialized, low-latency in-memory cache middleware implemented in pure Go (`backend/internal/middleware/cache.go`):
-
-* **Concurrent Safe Architecture**: Backed by `sync.RWMutex`, allowing thousands of simultaneous non-blocking concurrent reads (`RLock`) alongside thread-safe writes (`Lock`).
-* **Microsecond Response Times**: Cached GET requests (such as warehouse catalogs, product lists, and inventory metrics) bypass database roundtrips entirely, serving responses in **< 1 millisecond**.
-* **Zero Stale-Read Guarantee (Auto-Invalidation)**: Any mutating HTTP method (`POST`, `PUT`, `DELETE`, `PATCH`) returning a successful `2xx` response triggers an atomic cache purge, guaranteeing that clients always view 100% up-to-date data.
-* **Sensitive Route Passthrough**: Real-time critical routes (such as Auth session validation, health probes, and push notifications) automatically bypass the cache layer.
+* Backed by `sync.RWMutex` — concurrent reads don't block each other, writes take an exclusive lock.
+* GET requests for things like warehouse/product/inventory listings are served from cache instead of hitting MongoDB.
+* Any mutating request (`POST`/`PUT`/`DELETE`/`PATCH`) that returns a 2xx response invalidates the relevant cache entries, so stale data isn't served after a write.
+* Auth and health-check routes bypass the cache entirely.
 
 ```
-[Incoming Request] ──> [Cache Middleware]
-                           ├── (GET & Cached)  ──> [Instant 200 Response (< 1ms)] 🚀
-                           └── (Mutation/Miss) ──> [Controller Layer]
-                                                        ├── [Execute Business Logic]
-                                                        └── (Success 2xx) ──> [Invalidate Cache] 🔄
+[Incoming Request] --> [Cache Middleware]
+                          |-- GET, cached      --> return cached response
+                          '-- mutation / miss  --> [Controller] --> on 2xx --> [invalidate cache]
 ```
 
----
+## Load Testing & Benchmarks
 
-## 🧪 Chaos Testing & Performance Benchmarks
+Ran a local load/fault-injection script (`backend/cmd/chaos/main.go`) to check a few specific failure modes I was worried about:
 
-StockFlow has undergone rigorous automated chaos engineering and stress testing (`backend/cmd/chaos/main.go`) to validate system resilience under extreme load and hostile conditions:
+| Scenario | Load | Result |
+| :--- | :--- | :--- |
+| Concurrent reads | 2,000 concurrent requests | 100% success, ~0.85ms avg latency (served from cache) |
+| Overselling under contention | 50 concurrent buyers competing for 5 units | Exactly 5 orders succeeded, 45 correctly rejected, no negative stock |
+| DB disconnect | Simulated MongoDB timeout | Falls back to in-memory engine automatically, no downtime observed |
+| Invalid/expired JWTs | 500 malformed auth attempts | All rejected with 401 |
 
-### 📊 Benchmark Summary
+These numbers are from a single local run on my own machine, not a production environment — treat them as "the mechanism works as intended under this test," not as guaranteed production performance.
 
-| Test Scenario | Concurrency / Load | Success Rate | Avg Latency | Result |
-| :--- | :--- | :--- | :--- | :--- |
-| **High-Volume Concurrent Reading** | 2,000 concurrent requests | **100%** | **0.85 ms** | ✅ Zero packet loss, served via memory cache |
-| **Stock Overdraft Race Condition** | 50 concurrent buyers competing for 5 units | **100%** | **4.2 ms** | ✅ Exactly 5 orders succeeded; 45 gracefully rejected; **0 negative stock** |
-| **Database Failure Resilience** | Simulated DB disconnect / timeout | **100%** | **1.2 ms** | ✅ Instant graceful switch to In-Memory Engine; zero downtime |
-| **Token Hijacking & Brute Force** | 500 malicious invalid JWT / expired tokens | **100% Blocked** | **0.4 ms** | ✅ Unauthorized access rejected with HTTP 401 |
+All tests pass with `go test -race -v ./...`, no race conditions flagged by Go's race detector.
 
-> [!NOTE]
-> All unit tests and race detection passes with `go test -race -v ./...` with **zero race conditions detected**.
+## Tech Stack
 
----
+**Backend**
+* Go 1.24+
+* [Gin](https://github.com/gin-gonic/gin) — HTTP framework
+* [MongoDB Go Driver](https://go.mongodb.org/mongo-driver)
+* [golang-jwt/jwt/v5](https://github.com/golang-jwt/jwt) + bcrypt for auth
 
-## 🛠️ Tech Stack Breakdown
+**Frontend**
+* Next.js 16 (App Router, React Server Components)
+* Tailwind CSS v4
+* [Lucide React](https://lucide.dev/) for icons
+* TypeScript throughout
 
-### Backend
-* **Language**: Go (`go 1.24+`) — chosen for compiled native performance, minimal memory footprint, and goroutine concurrency.
-* **Framework**: [Gin Web Framework](https://github.com/gin-gonic/gin) — lightweight, high-performance HTTP web framework with optimized routing trees.
-* **Database Driver**: [MongoDB Go Driver](https://go.mongodb.org/mongo-driver) — connection pooling, atomic operations, and BSON serialization.
-* **Authentication**: [golang-jwt/jwt/v5](https://github.com/golang-jwt/jwt) with bcrypt password hashing.
-
-### Frontend
-* **Framework**: [Next.js 16](https://nextjs.org/) (App Router architecture with React Server Components).
-* **Styling**: [Tailwind CSS v4](https://tailwindcss.com/) — modern CSS-first configuration, Finnova Iris theme palette, and smooth cubic-bezier transitions.
-* **Icons**: [Lucide React](https://lucide.dev/) — clean, uniform iconography.
-* **Language**: TypeScript — end-to-end type safety spanning backend DTOs to UI state.
-
----
-
-## 🏁 Getting Started
+## Getting Started
 
 ### Prerequisites
-* **Go** 1.24 or higher
-* **Node.js** 20.x or higher & npm
-* **MongoDB** instance (Local or MongoDB Atlas)
+* Go 1.24+
+* Node.js 20.x+ and npm
+* A MongoDB instance (local or MongoDB Atlas) — or skip this and run in in-memory mode
 
----
-
-### 1. Backend Setup
+### Backend
 
 ```bash
-# Navigate to backend directory
 cd backend
-
-# Copy environment configuration
 cp .env.example .env
+# edit .env:
+#   PORT=8080
+#   MONGO_URI=your_mongodb_connection_string
+#   DB_NAME=stockflow
+#   JWT_SECRET=your_own_secret
+#   USE_IN_MEMORY_DB=false   # set to true to skip MongoDB entirely
 
-# Edit .env with your configuration:
-# PORT=8080
-# MONGO_URI=your_mongodb_connection_string
-# DB_NAME=stockflow
-# JWT_SECRET=your_super_secret_jwt_key
-# USE_IN_MEMORY_DB=false (set true if running without a live database)
-
-# Run API server
 go run cmd/api/main.go
 ```
-API server will start on `http://localhost:8080`.
+API runs on `http://localhost:8080`.
 
----
-
-### 2. Frontend Setup
+### Frontend
 
 ```bash
-# Navigate to frontend directory
 cd frontend
-
-# Copy local environment configuration
 cp .env.local.example .env.local
-
-# Install dependencies
 npm install
-
-# Start Next.js development server
 npm run dev
 ```
-Client dashboard will be available at `http://localhost:3000`.
+App runs on `http://localhost:3000`.
 
----
+### First-run admin account
 
-## 🔐 Default Admin Account
+On first startup, StockFlow seeds a Super Admin account so you have a way in. The email and generated password are printed once to the server console/log on that first run — they are **not** hardcoded here. Log in with those, then immediately change the password and create your real accounts from the User Management panel. If you're setting up a public demo, use a separate, restricted, seed-data-only account rather than this admin login.
 
-When initialized for the first time, StockFlow automatically seeds a default Super Admin account:
+## License
 
-* **Email**: `admin@stockflow.com`
-* **Password**: `Admin123!`
-
-*(Additional accounts with custom roles can be registered from the User Management panel)*
-
----
-
-## 📄 License
-
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+MIT — see [LICENSE](LICENSE).
