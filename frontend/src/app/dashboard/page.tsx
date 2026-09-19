@@ -249,17 +249,19 @@ export default function DashboardPage() {
 
     switch (selectedDateRange) {
       case 'today': {
+        // Hourly comparison: last 1 hour vs previous hour
+        currentStart = new Date(now.getTime() - 60 * 60 * 1000);
+        prevStart = new Date(now.getTime() - 120 * 60 * 1000);
+        prevEnd = currentStart;
+        comparisonLabel = t('vsLastHour');
+        break;
+      }
+      case 'last_7d': {
+        // Daily comparison: today vs yesterday
         currentStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
         prevStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0);
         prevEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59, 999);
         comparisonLabel = t('vsYesterday');
-        break;
-      }
-      case 'last_7d': {
-        currentStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        prevStart = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
-        prevEnd = new Date(currentStart.getTime());
-        comparisonLabel = t('vsPrev7Days');
         break;
       }
       case 'this_month': {
@@ -541,9 +543,9 @@ export default function DashboardPage() {
                 </p>
               </div>
 
-              <div className="mt-3 flex items-center gap-1.5">
+              <div className="mt-3 flex items-center gap-1.5 min-w-0">
                 <span
-                  className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                  className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[11px] font-semibold shrink-0 ${
                     m.isPositive
                       ? 'bg-[#E4F7EC] text-[#1FAA59]'
                       : 'bg-[#FBE8EA] text-[#E0475C]'
@@ -556,8 +558,9 @@ export default function DashboardPage() {
                   )}
                   {m.change}
                 </span>
-                <span className="text-xs text-[#8B8B99] dark:text-slate-400">vs last month</span>
-                <span className="text-xs text-[#8B8B99] dark:text-slate-400">{m.comparisonLabel}</span>
+                <span className="text-xs text-[#8B8B99] dark:text-slate-400 truncate">
+                  {m.comparisonLabel}
+                </span>
               </div>
             </Link>
           ))}
@@ -569,26 +572,29 @@ export default function DashboardPage() {
           <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-2xl border border-[#EEEDF5] dark:border-slate-800 p-6 shadow-xs flex flex-col justify-between transition-colors">
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#EEEDF5] dark:border-slate-800">
-              <div>
-                <h2 className="text-base font-bold text-[#1B1B1F] dark:text-white">
-                  {t('chartFlowTitle')}
-                </h2>
-                <p className="text-xs text-[#8B8B99] dark:text-slate-400 mt-0.5 flex items-center gap-1.5">
-                  <span>{t('chartFlowSubtitle')}</span>
-                  <span>•</span>
-                  <span className="font-medium text-[#7C6EF0] dark:text-[#9D93F5]">{selectedDateLabel}</span>
-                </p>
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <div>
+                  <h2 className="text-base font-bold text-[#1B1B1F] dark:text-white">
+                    {t('chartFlowTitle')}
+                  </h2>
+                  <p className="text-xs text-[#8B8B99] dark:text-slate-400 mt-0.5">
+                    {t('chartFlowSubtitle')}
+                  </p>
+                </div>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-[#F4F3FF] dark:bg-slate-800 text-[#7C6EF0] dark:text-[#A78BFA] border border-[#EEEDF5] dark:border-slate-700">
+                  {selectedDateLabel}
+                </span>
               </div>
 
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-4 flex-wrap sm:flex-nowrap">
                 {/* Dots Legend */}
-                <div className="flex items-center gap-3 text-xs text-[#8B8B99] dark:text-slate-400">
+                <div className="flex items-center gap-3 text-xs text-[#8B8B99] dark:text-slate-400 whitespace-nowrap">
                   <div className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#7C6EF0]" />
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#7C6EF0] shrink-0" />
                     <span>{t('inboundIntake')}</span>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#C7BFFA]" />
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#C7BFFA] shrink-0" />
                     <span>{t('outboundFulfillment')}</span>
                   </div>
                 </div>
@@ -597,7 +603,7 @@ export default function DashboardPage() {
                 <select
                   value={chartPeriod}
                   onChange={(e) => setChartPeriod(e.target.value as 'monthly' | 'daily')}
-                  className="px-3 py-1 text-xs rounded-full border border-[#EEEDF5] dark:border-slate-700 text-[#1B1B1F] dark:text-slate-200 bg-white dark:bg-slate-800 focus:outline-none focus:ring-1 focus:ring-[#7C6EF0] cursor-pointer"
+                  className="px-3 py-1 text-xs rounded-full border border-[#EEEDF5] dark:border-slate-700 text-[#1B1B1F] dark:text-slate-200 bg-white dark:bg-slate-800 focus:outline-none focus:ring-1 focus:ring-[#7C6EF0] cursor-pointer shrink-0"
                 >
                   <option value="monthly">{t('chartPeriodMonthly')}</option>
                   <option value="daily">{t('chartPeriodDaily')}</option>
