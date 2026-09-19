@@ -1,16 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { api } from '@/lib/api';
-import { ProductListResult } from '@/types/product';
 import { Product, ProductListResult } from '@/types/product';
 import { InventoryStats } from '@/types/inventory';
-import { POStats } from '@/types/po';
-import { SOStats } from '@/types/so';
 import { POStats, PurchaseOrder } from '@/types/po';
 import { SOStats, SalesOrder } from '@/types/so';
 import {
@@ -129,8 +125,6 @@ export default function DashboardPage() {
   useEffect(() => {
     async function loadStats() {
       try {
-        const [prodRes, invRes, poRes, soRes, movRes] = await Promise.all([
-          api.get<ProductListResult>('/products?page=1&limit=1'),
         const [prodRes, invRes, poRes, soRes, movRes, poListRes, soListRes] = await Promise.all([
           api.get<ProductListResult>('/products?page=1&limit=200'),
           api.get<InventoryStats>('/inventory/stats'),
@@ -142,7 +136,6 @@ export default function DashboardPage() {
         ]);
 
         if (prodRes.success && prodRes.data) {
-          setTotalProducts(prodRes.data.meta.total);
           setTotalProducts(prodRes.data.meta?.total ?? prodRes.data.products?.length ?? 0);
           setProductsList(prodRes.data.products || []);
         }
@@ -205,7 +198,6 @@ export default function DashboardPage() {
       try {
         const tzOffset = -new Date().getTimezoneOffset();
         const [flowRes, capRes] = await Promise.all([
-          api.get<{ points: FlowPoint[] }>(
           api.get<{ points: FlowPoint[]; total_inbound?: number; total_outbound?: number }>(
             `/inventory/analytics/flow?period=${chartPeriod}&range=${selectedDateRange}&tz_offset=${tzOffset}`
           ),
@@ -242,55 +234,11 @@ export default function DashboardPage() {
   );
 
   const selectedDateLabel =
-    dateOptions.find((o) => o.id === selectedDateRange)?.label || dateOptions[2].label;
     dateOptions.find((o) => o.id === selectedDateRange)?.label || dateOptions[0].label;
 
   // Dynamic SVG palette for Donut segments
   const donutColors = ['#7C6EF0', '#9D93F5', '#C7BFFA', '#A78BFA', '#818CF8'];
 
-  // Metrics array
-  const metrics = [
-    {
-      title: t('kpiTotalProducts'),
-      value: totalProducts.toString(),
-      change: '+0.0%',
-      isPositive: true,
-      icon: Package,
-      href: '/products',
-    },
-    {
-      title: t('kpiTotalStock'),
-      value: invStats ? invStats.total_on_hand.toLocaleString() : '0',
-      change: '+0.0%',
-      isPositive: true,
-      icon: Boxes,
-      href: '/inventory',
-    },
-    {
-      title: t('kpiLowStock'),
-      value: invStats ? invStats.low_stock_items_count.toString() : '0',
-      change: '0',
-      isPositive: false,
-      icon: AlertTriangle,
-      href: '/inventory',
-    },
-    {
-      title: t('kpiPendingPOs'),
-      value: poStats ? poStats.pending_orders.toString() : '0',
-      change: '+0.0%',
-      isPositive: true,
-      icon: ArrowDownLeft,
-      href: '/purchase-orders',
-    },
-    {
-      title: t('kpiActiveSOs'),
-      value: soStats ? soStats.pending_fulfillment.toString() : '0',
-      change: '+0.0%',
-      isPositive: true,
-      icon: ArrowUpRight,
-      href: '/outbound-orders',
-    },
-  ];
   // Dynamic KPI calculations based on real records and date range comparison
   const metrics = useMemo(() => {
     const now = new Date();
