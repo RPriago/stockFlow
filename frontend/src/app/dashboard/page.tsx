@@ -89,11 +89,13 @@ export default function DashboardPage() {
 
   // Interactive Date Range State
   const [selectedDateRange, setSelectedDateRange] = useState('this_month');
+  const [selectedDateRange, setSelectedDateRange] = useState('today');
   const [isDateMenuOpen, setIsDateMenuOpen] = useState(false);
   const dateMenuRef = useRef<HTMLDivElement>(null);
 
   // Interactive Chart Period State
   const [chartPeriod, setChartPeriod] = useState<'monthly' | 'daily'>('monthly');
+  const [chartPeriod, setChartPeriod] = useState<'monthly' | 'daily'>('daily');
   const [hoveredBarIndex, setHoveredBarIndex] = useState<number | null>(null);
 
   const dateOptions = [
@@ -203,6 +205,7 @@ export default function DashboardPage() {
 
   const selectedDateLabel =
     dateOptions.find((o) => o.id === selectedDateRange)?.label || dateOptions[2].label;
+    dateOptions.find((o) => o.id === selectedDateRange)?.label || dateOptions[0].label;
 
   // Dynamic SVG palette for Donut segments
   const donutColors = ['#7C6EF0', '#9D93F5', '#C7BFFA', '#A78BFA', '#818CF8'];

@@ -124,6 +124,22 @@ export default function ProductsPage() {
     return () => clearTimeout(timer);
   }, [fetchProducts]);
 
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const q = urlParams.get('search');
+      if (q) setSearch(q);
+
+      const handleAppSearch = (e: any) => {
+        if (typeof e.detail === 'string') {
+          setSearch(e.detail);
+        }
+      };
+      window.addEventListener('app:search', handleAppSearch);
+      return () => window.removeEventListener('app:search', handleAppSearch);
+    }
+  }, []);
+
   // Open Add Modal
   const handleOpenAddModal = () => {
     setSelectedProduct(null);
@@ -199,6 +215,9 @@ export default function ProductsPage() {
         price: formPrice,
         cost_price: formCostPrice,
         min_stock: formMinStock,
+        price: '',
+        cost_price: formCostPrice !== '' ? formCostPrice : '',
+        min_stock: formMinStock !== '' ? formMinStock : 10,
         attributeKey: 'option',
         attributeVal: '',
       },
@@ -213,6 +232,39 @@ export default function ProductsPage() {
   const handleSubmitProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
+
+    // Validation for Selling Price & Cost Price
+    if (formPrice === '' || Number(formPrice) <= 0) {
+      setFormError(
+        language === 'id'
+          ? 'Selling Price (Harga Jual) wajib diisi dengan angka lebih dari 0'
+          : 'Selling Price is required and must be greater than 0'
+      );
+      return;
+    }
+
+    if (formCostPrice === '' || Number(formCostPrice) < 0) {
+      setFormError(
+        language === 'id'
+          ? 'Cost Price (Harga Pokok/Beli) wajib diisi'
+          : 'Cost Price is required'
+      );
+      return;
+    }
+
+    // Validation for Variant Prices
+    for (let i = 0; i < formVariants.length; i++) {
+      const v = formVariants[i];
+      if (v.price === '' || Number(v.price) <= 0) {
+        setFormError(
+          language === 'id'
+            ? `Variant "${v.name || `#${i + 1}`}" Price wajib diisi. Silakan isi harga varian atau hapus (tombol X) baris varian tersebut.`
+            : `Variant "${v.name || `#${i + 1}`}" Price is required. Please fill in the price or delete (click X) that variant.`
+        );
+        return;
+      }
+    }
+
     setIsSubmitting(true);
 
     const payload = {
@@ -736,10 +788,14 @@ export default function ProductsPage() {
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1.5">
                     {t('sellingPriceLabel')}
+                    {t('sellingPriceLabel')} <span className="text-red-500 font-bold">*</span>
                   </label>
                   <input
                     type="number"
                     min="0"
+                    min="0.01"
+                    step="any"
+                    required
                     placeholder="0"
                     value={formPrice}
                     onChange={(e) => setFormPrice(e.target.value === '' ? '' : Number(e.target.value))}
@@ -750,10 +806,13 @@ export default function ProductsPage() {
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1.5">
                     {t('costPriceLabel')}
+                    {t('costPriceLabel')} <span className="text-red-500 font-bold">*</span>
                   </label>
                   <input
                     type="number"
                     min="0"
+                    step="any"
+                    required
                     placeholder="0"
                     value={formCostPrice}
                     onChange={(e) => setFormCostPrice(e.target.value === '' ? '' : Number(e.target.value))}
@@ -888,10 +947,14 @@ export default function ProductsPage() {
                           <div>
                             <label className="block text-[11px] font-semibold uppercase text-slate-500 mb-1">
                               Variant Price (IDR)
+                              Variant Price (IDR) <span className="text-red-500 font-bold">*</span>
                             </label>
                             <input
                               type="number"
                               min="0"
+                              min="0.01"
+                              step="any"
+                              required
                               placeholder="0"
                               value={v.price}
                               onChange={(e) => {

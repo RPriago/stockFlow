@@ -34,6 +34,8 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
   const router = useRouter();
 
   const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [showNotifPopover, setShowNotifPopover] = useState(false);
   const [notifFilter, setNotifFilter] = useState<'all' | 'unread'>('all');
 
@@ -222,18 +224,58 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
         <div className="relative">
           {showSearch ? (
             <div className="flex items-center">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const q = searchQuery.trim();
+                if (q) {
+                  setShowSearch(false);
+                  setSearchQuery('');
+                  if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('app:search', { detail: q }));
+                  }
+                  router.push(`/products?search=${encodeURIComponent(q)}`);
+                }
+              }}
+              className="flex items-center"
+            >
               <input
+                ref={searchInputRef}
                 type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder={t('search')}
                 autoFocus
                 onBlur={() => setShowSearch(false)}
                 className="w-44 sm:w-64 pl-9 pr-3 py-1.5 text-xs bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-full text-[#1B1B1F] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]"
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    setShowSearch(false);
+                    setSearchQuery('');
+                  }
+                }}
+                className="w-48 sm:w-72 pl-9 pr-8 py-1.5 text-xs bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-full text-[#1B1B1F] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]"
               />
               <Search className="w-3.5 h-3.5 text-[#8B8B99] dark:text-slate-400 absolute left-3 pointer-events-none stroke-[1.8]" />
             </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSearch(false);
+                  setSearchQuery('');
+                }}
+                className="absolute right-2.5 p-0.5 text-[#8B8B99] hover:text-[#1B1B1F] dark:hover:text-white cursor-pointer"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </form>
           ) : (
             <button
               onClick={() => setShowSearch(true)}
+              onClick={() => {
+                setShowSearch(true);
+                setTimeout(() => searchInputRef.current?.focus(), 50);
+              }}
               className="w-9 h-9 rounded-full bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 flex items-center justify-center text-[#8B8B99] dark:text-slate-400 hover:text-[#1B1B1F] dark:hover:text-white hover:border-[#C7BFFA] transition-all cursor-pointer"
               title={t('search')}
             >

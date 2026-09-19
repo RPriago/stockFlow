@@ -47,6 +47,18 @@ func (s *productService) CreateProduct(ctx context.Context, req models.CreatePro
 		return nil, errors.New("selected category does not exist")
 	}
 
+	if req.Price <= 0 {
+		return nil, errors.New("selling price must be greater than 0")
+	}
+	if req.CostPrice < 0 {
+		return nil, errors.New("cost price cannot be negative")
+	}
+	for i, v := range req.Variants {
+		if v.Price <= 0 {
+			return nil, fmt.Errorf("variant %d (%s) price must be greater than 0", i+1, v.Name)
+		}
+	}
+
 	// Auto-generate SKU if not provided
 	sku := strings.TrimSpace(req.SKU)
 	if sku == "" {
@@ -148,6 +160,18 @@ func (s *productService) UpdateProduct(ctx context.Context, id primitive.ObjectI
 	category, err := s.productRepo.FindCategoryByID(ctx, catOID)
 	if err != nil {
 		return nil, errors.New("selected category does not exist")
+	}
+
+	if req.Price <= 0 {
+		return nil, errors.New("selling price must be greater than 0")
+	}
+	if req.CostPrice < 0 {
+		return nil, errors.New("cost price cannot be negative")
+	}
+	for i, v := range req.Variants {
+		if v.Price <= 0 {
+			return nil, fmt.Errorf("variant %d (%s) price must be greater than 0", i+1, v.Name)
+		}
 	}
 
 	sku := strings.TrimSpace(req.SKU)
