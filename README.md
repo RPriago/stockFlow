@@ -165,7 +165,6 @@ cp .env.example .env
 
 go run cmd/api/main.go
 ```
-API runs on `http://localhost:8080`.
 
 ### Frontend
 
@@ -175,11 +174,14 @@ cp .env.local.example .env.local
 npm install
 npm run dev
 ```
-App runs on `http://localhost:3000`.
 
 ### First-run admin account
 
 On first startup, StockFlow seeds a Super Admin account so you have a way in. The email and generated password are printed once to the server console/log on that first run — they are **not** hardcoded here. Log in with those, then immediately change the password and create your real accounts from the User Management panel. If you're setting up a public demo, use a separate, restricted, seed-data-only account rather than this admin login.
+
+## Live Demo
+
+Demo runs on `https://stock-flow-brown.vercel.app/'
 
 ## License
 
