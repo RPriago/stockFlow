@@ -376,20 +376,20 @@ export default function ProductsPage() {
           </div>
 
           {canManage && (
-            <div className="flex items-center gap-2.5 self-start sm:self-auto">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
               <button
                 onClick={() => setShowCategoryModal(true)}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-[#EEEDF5] dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-semibold text-[#1B1B1F] dark:text-white hover:border-[#7C6EF0] hover:text-[#7C6EF0] transition-colors shadow-xs cursor-pointer"
+                className="inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-full border border-[#EEEDF5] dark:border-slate-700 bg-white dark:bg-slate-800 text-xs sm:text-sm font-semibold text-[#1B1B1F] dark:text-white hover:border-[#7C6EF0] hover:text-[#7C6EF0] transition-colors shadow-xs cursor-pointer"
               >
-                <FolderPlus className="w-4 h-4 stroke-[1.8] text-[#8B8B99] dark:text-slate-400" />
+                <FolderPlus className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[1.8] text-[#8B8B99] dark:text-slate-400" />
                 <span>{t('addCategory')}</span>
               </button>
 
               <button
                 onClick={handleOpenAddModal}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#7C6EF0] text-white text-sm font-semibold hover:bg-[#6C5CE7] transition-all shadow-sm shadow-[#7C6EF0]/20 cursor-pointer"
+                className="inline-flex items-center gap-1.5 sm:gap-2 px-3.5 sm:px-4 py-2 rounded-full bg-[#7C6EF0] text-white text-xs sm:text-sm font-semibold hover:bg-[#6C5CE7] transition-all shadow-sm shadow-[#7C6EF0]/20 cursor-pointer"
               >
-                <Plus className="w-4 h-4 stroke-[2.5]" />
+                <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" />
                 <span>{t('addProduct')}</span>
               </button>
             </div>

@@ -253,9 +253,9 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
   );
 
   return (
-    <header className="h-16 bg-white dark:bg-slate-900 border-b border-[#EEEDF5] dark:border-slate-800 flex items-center justify-between px-6 lg:px-8 sticky top-0 z-30 transition-colors">
+    <header className="h-16 bg-white dark:bg-slate-900 border-b border-[#EEEDF5] dark:border-slate-800 flex items-center justify-between px-3 sm:px-6 lg:px-8 sticky top-0 z-30 transition-colors">
       {/* Left: Mobile hamburger */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 sm:gap-3">
         <button
           onClick={onMenuToggle}
           className="lg:hidden p-2 rounded-xl text-[#8B8B99] hover:text-[#1B1B1F] dark:text-slate-400 dark:hover:text-white hover:bg-[#EEEDF5] dark:hover:bg-slate-800 transition-colors"
@@ -266,7 +266,7 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
       </div>
 
       {/* Right: Search, Language Switcher, Notifications, Profile */}
-      <div className="flex items-center gap-3.5 ml-auto">
+      <div className="flex items-center gap-2 sm:gap-3.5 ml-auto">
         {/* Search button / input */}
         <div className="relative">
           {showSearch ? (
@@ -298,16 +298,16 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
                     setSearchQuery('');
                   }
                 }}
-                className="w-48 sm:w-72 pl-9 pr-8 py-1.5 text-xs bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-full text-[#1B1B1F] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]"
+                className="w-36 xs:w-48 sm:w-72 pl-8 sm:pl-9 pr-7 sm:pr-8 py-1.5 text-xs bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-full text-[#1B1B1F] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]"
               />
-              <Search className="w-3.5 h-3.5 text-[#8B8B99] dark:text-slate-400 absolute left-3 pointer-events-none stroke-[1.8]" />
+              <Search className="w-3.5 h-3.5 text-[#8B8B99] dark:text-slate-400 absolute left-2.5 sm:left-3 pointer-events-none stroke-[1.8]" />
               <button
                 type="button"
                 onClick={() => {
                   setShowSearch(false);
                   setSearchQuery('');
                 }}
-                className="absolute right-2.5 p-0.5 text-[#8B8B99] hover:text-[#1B1B1F] dark:hover:text-white cursor-pointer"
+                className="absolute right-2 sm:right-2.5 p-0.5 text-[#8B8B99] hover:text-[#1B1B1F] dark:hover:text-white cursor-pointer"
               >
                 <X className="w-3 h-3" />
               </button>
@@ -331,7 +331,7 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
           <button
             type="button"
             onClick={() => setLanguage('id')}
-            className={`px-2.5 py-1 rounded-full transition-all cursor-pointer text-[11px] ${
+            className={`px-2 sm:px-2.5 py-1 rounded-full transition-all cursor-pointer text-[10px] sm:text-[11px] ${
               language === 'id'
                 ? 'bg-[#7C6EF0] text-white shadow-xs font-bold'
                 : 'text-[#8B8B99] dark:text-slate-400 hover:text-[#1B1B1F] dark:hover:text-white'
@@ -343,7 +343,7 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
           <button
             type="button"
             onClick={() => setLanguage('en')}
-            className={`px-2.5 py-1 rounded-full transition-all cursor-pointer text-[11px] ${
+            className={`px-2 sm:px-2.5 py-1 rounded-full transition-all cursor-pointer text-[10px] sm:text-[11px] ${
               language === 'en'
                 ? 'bg-[#7C6EF0] text-white shadow-xs font-bold'
                 : 'text-[#8B8B99] dark:text-slate-400 hover:text-[#1B1B1F] dark:hover:text-white'
@@ -383,39 +383,58 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
             )}
           </button>
 
+          {/* Mobile backdrop for notification popover */}
+          {showNotifPopover && (
+            <div
+              className="fixed inset-0 z-40 bg-black/25 dark:bg-black/50 backdrop-blur-xs sm:hidden animate-in fade-in duration-150"
+              onClick={() => setShowNotifPopover(false)}
+            />
+          )}
+
           {/* Notification Popover Dropdown */}
           {showNotifPopover && (
             <div
               ref={popoverRef}
-              className="absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150"
+              className="fixed inset-x-2.5 top-[68px] max-w-md mx-auto sm:mx-0 sm:max-w-none sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-96 max-h-[calc(100vh-80px)] flex flex-col rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150"
             >
               {/* Header */}
-              <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+              <div className="p-3.5 sm:p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between flex-shrink-0">
+                <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate">
                     {language === 'id' ? 'Notifikasi' : 'Notifications'}
                   </h3>
                   {unreadCount > 0 && (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300">
+                    <span className="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 flex-shrink-0">
                       {unreadCount} {language === 'id' ? 'baru' : 'new'}
                     </span>
                   )}
                 </div>
 
-                {unreadCount > 0 && (
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {unreadCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleMarkAllAsRead}
+                      className="text-[11px] font-medium text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 flex items-center gap-1 cursor-pointer transition-colors"
+                    >
+                      <CheckCheck className="w-3.5 h-3.5" />
+                      <span className="whitespace-nowrap">{language === 'id' ? 'Tandai dibaca' : 'Mark all read'}</span>
+                    </button>
+                  )}
+                  {/* Close button on mobile devices */}
                   <button
                     type="button"
-                    onClick={handleMarkAllAsRead}
-                    className="text-[11px] font-medium text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 flex items-center gap-1 cursor-pointer transition-colors"
+                    onClick={() => setShowNotifPopover(false)}
+                    className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 sm:hidden cursor-pointer"
+                    aria-label="Close"
                   >
-                    <CheckCheck className="w-3.5 h-3.5" />
-                    <span>{language === 'id' ? 'Tandai semua dibaca' : 'Mark all read'}</span>
+                    <X className="w-4 h-4" />
                   </button>
-                )}
+                </div>
               </div>
 
               {/* Filter Tabs */}
-              <div className="px-4 pt-2.5 pb-1 flex items-center gap-2 border-b border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-800/30">
+              <div className="px-3.5 sm:px-4 pt-2.5 pb-1 flex items-center gap-2 border-b border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-800/30 flex-shrink-0">
                 <button
                   type="button"
                   onClick={() => setNotifFilter('all')}
@@ -441,7 +460,7 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
               </div>
 
               {/* Notification List */}
-              <div className="max-h-[360px] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/80">
+              <div className="flex-1 min-h-0 max-h-[360px] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/80">
                 {filteredNotifications.length === 0 ? (
                   <div className="py-12 px-4 text-center">
                     <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto mb-2.5">
@@ -525,7 +544,7 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
                         <button
                           type="button"
                           onClick={(e) => handleDeleteNotification(notif.id, e)}
-                          className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-rose-600 p-1 transition-opacity absolute top-3 right-3 rounded"
+                          className="opacity-70 sm:opacity-0 sm:group-hover:opacity-100 hover:opacity-100 text-slate-400 hover:text-rose-600 p-1 transition-opacity absolute top-3 right-3 rounded cursor-pointer"
                           title={language === 'id' ? 'Hapus' : 'Delete'}
                         >
                           <X className="w-3.5 h-3.5" />
@@ -537,7 +556,7 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
               </div>
 
               {/* Footer */}
-              <div className="p-2.5 bg-slate-50 dark:bg-slate-800/60 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-3.5">
+              <div className="p-2.5 bg-slate-50 dark:bg-slate-800/60 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-3.5 flex-shrink-0">
                 <span className="flex items-center gap-1 text-[10px]">
                   <Clock className="w-3 h-3 text-slate-400" />
                   {language === 'id' ? 'Otomatis hilang per 3x24 jam' : 'Auto-expires in 3 days'}

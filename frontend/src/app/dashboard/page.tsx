@@ -515,7 +515,7 @@ export default function DashboardPage() {
               </button>
 
               {isDateMenuOpen && (
-                <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-800 rounded-2xl border border-[#EEEDF5] dark:border-slate-700 shadow-xl py-1.5 z-40 animate-in fade-in zoom-in-95">
+                <div className="absolute left-0 sm:left-auto sm:right-0 mt-2 w-48 bg-white dark:bg-slate-800 rounded-2xl border border-[#EEEDF5] dark:border-slate-700 shadow-xl py-1.5 z-40 animate-in fade-in zoom-in-95">
                   <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#8B8B99] dark:text-slate-400 border-b border-[#EEEDF5] dark:border-slate-700/60 mb-1">
                     {t('filter')}
                   </div>
