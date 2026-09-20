@@ -7,7 +7,7 @@
 [![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248?style=flat-square&logo=mongodb&logoColor=white)](https://www.mongodb.com)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 
-**[🚀 Launch Live Application: https://stock-flow-brown.vercel.app/](https://stock-flow-brown.vercel.app/)**
+**Launch Live Application:(https://stock-flow-brown.vercel.app/)**
 
 [Live Platform](#live-application) • [Architecture](#system-architecture) • [Workflows](#operational-workflows) • [Real-Time Sync](#real-time-event-synchronization) • [Benchmarks](#concurrency--chaos-benchmarks) • [Developer Setup](#developer-setup)
 
