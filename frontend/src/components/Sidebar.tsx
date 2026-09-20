@@ -153,11 +153,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
             <button
               type="button"
               onClick={() => handleSetTheme(false)}
-              className={`flex-1 flex items-center justify-center py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
-                !isDarkMode
-                  ? 'bg-[#7C6EF0] text-white shadow-xs'
-                  : 'text-[#8B8B99] dark:text-slate-400 hover:text-[#1B1B1F] dark:hover:text-white'
-              }`}
+              className="flex-1 flex items-center justify-center py-1 rounded-full text-xs font-medium transition-all cursor-pointer bg-[#7C6EF0] text-white shadow-xs dark:bg-transparent dark:text-slate-400 dark:hover:text-white dark:shadow-none"
               title={t('lightMode')}
             >
               <Sun className="w-3.5 h-3.5" />
@@ -165,11 +161,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
             <button
               type="button"
               onClick={() => handleSetTheme(true)}
-              className={`flex-1 flex items-center justify-center py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
-                isDarkMode
-                  ? 'bg-[#7C6EF0] text-white shadow-xs'
-                  : 'text-[#8B8B99] dark:text-slate-400 hover:text-[#1B1B1F] dark:hover:text-white'
-              }`}
+              className="flex-1 flex items-center justify-center py-1 rounded-full text-xs font-medium transition-all cursor-pointer text-[#8B8B99] hover:text-[#1B1B1F] dark:bg-[#7C6EF0] dark:text-white dark:hover:text-white dark:shadow-xs"
               title={t('darkMode')}
             >
               <Moon className="w-3.5 h-3.5" />

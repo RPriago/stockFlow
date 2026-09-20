@@ -131,11 +131,7 @@ export default function RegisterPage() {
           <button
             type="button"
             onClick={() => handleSetTheme(false)}
-            className={`p-1.5 rounded-full transition-all cursor-pointer ${
-              !isDarkMode
-                ? 'bg-[#7C6EF0] text-white shadow-xs'
-                : 'text-[#8B8B99] dark:text-slate-400 hover:text-[#1B1B1F] dark:hover:text-white'
-            }`}
+            className="p-1.5 rounded-full transition-all cursor-pointer bg-[#7C6EF0] text-white shadow-xs dark:bg-transparent dark:text-slate-400 dark:hover:text-white dark:shadow-none"
             title="Light mode"
           >
             <Sun className="w-3.5 h-3.5" />
@@ -143,11 +139,7 @@ export default function RegisterPage() {
           <button
             type="button"
             onClick={() => handleSetTheme(true)}
-            className={`p-1.5 rounded-full transition-all cursor-pointer ${
-              isDarkMode
-                ? 'bg-[#7C6EF0] text-white shadow-xs'
-                : 'text-[#8B8B99] dark:text-slate-400 hover:text-[#1B1B1F] dark:hover:text-white'
-            }`}
+            className="p-1.5 rounded-full transition-all cursor-pointer text-[#8B8B99] hover:text-[#1B1B1F] dark:bg-[#7C6EF0] dark:text-white dark:hover:text-white dark:shadow-xs"
             title="Dark mode"
           >
             <Moon className="w-3.5 h-3.5" />
