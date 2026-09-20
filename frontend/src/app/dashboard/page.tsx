@@ -186,10 +186,12 @@ export default function DashboardPage() {
     };
     if (typeof window !== 'undefined') {
       window.addEventListener('stockflow-notification-refresh', handleRefresh);
+      window.addEventListener('stockflow-sync', handleRefresh);
     }
     return () => {
       if (typeof window !== 'undefined') {
         window.removeEventListener('stockflow-notification-refresh', handleRefresh);
+        window.removeEventListener('stockflow-sync', handleRefresh);
       }
     };
   }, []);
@@ -228,6 +230,20 @@ export default function DashboardPage() {
     }
 
     fetchAnalytics();
+
+    const handleAnalyticsRefresh = () => {
+      fetchAnalytics();
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('stockflow-notification-refresh', handleAnalyticsRefresh);
+      window.addEventListener('stockflow-sync', handleAnalyticsRefresh);
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('stockflow-notification-refresh', handleAnalyticsRefresh);
+        window.removeEventListener('stockflow-sync', handleAnalyticsRefresh);
+      }
+    };
   }, [chartPeriod, selectedDateRange]);
 
   const maxBarVal = Math.max(

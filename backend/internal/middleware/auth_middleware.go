@@ -4,10 +4,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gin-gonic/gin"
 	"stockflow-backend/internal/config"
 	"stockflow-backend/internal/models"
 	"stockflow-backend/internal/utils"
+
+	"github.com/gin-gonic/gin"
 )
 
 const (
@@ -33,6 +34,11 @@ func AuthMiddleware(cfg *config.Config) gin.HandlerFunc {
 			if strings.HasPrefix(authHeader, "Bearer ") {
 				tokenString = strings.TrimPrefix(authHeader, "Bearer ")
 			}
+		}
+
+		// 3. Fallback to query param (for EventSource SSE streaming)
+		if tokenString == "" {
+			tokenString = c.Query("token")
 		}
 
 		if tokenString == "" {

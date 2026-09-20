@@ -204,6 +204,31 @@ export default function InventoryPage() {
     }
   }, [activeTab, fetchMovements]);
 
+  // Real-time auto-refresh across browsers
+  useEffect(() => {
+    const handleSync = (e: any) => {
+      const resource = e?.detail?.resource;
+      if (
+        !resource ||
+        resource === 'inventory' ||
+        resource === 'products' ||
+        resource === 'warehouses' ||
+        resource === 'purchase_orders' ||
+        resource === 'sales_orders'
+      ) {
+        fetchInventory();
+        fetchStats();
+        if (activeTab === 'ledger') {
+          fetchMovements();
+        }
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('stockflow-sync', handleSync);
+      return () => window.removeEventListener('stockflow-sync', handleSync);
+    }
+  }, [fetchInventory, fetchStats, fetchMovements, activeTab]);
+
   // When formWhId changes, prefetch its locations
   useEffect(() => {
     if (formWhId) {

@@ -125,6 +125,23 @@ export default function WarehousesPage() {
     }
   }, [selectedWarehouse?.id, fetchLocations]);
 
+  // Real-time auto-refresh across browsers
+  useEffect(() => {
+    const handleSync = (e: any) => {
+      const resource = e?.detail?.resource;
+      if (!resource || resource === 'warehouses' || resource === 'locations' || resource === 'inventory') {
+        fetchWarehouses();
+        if (selectedWarehouse?.id) {
+          fetchLocations(selectedWarehouse.id);
+        }
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('stockflow-sync', handleSync);
+      return () => window.removeEventListener('stockflow-sync', handleSync);
+    }
+  }, [fetchWarehouses, fetchLocations, selectedWarehouse?.id]);
+
   // Open Add Warehouse
   const handleOpenAddWh = () => {
     setIsEditingWh(false);

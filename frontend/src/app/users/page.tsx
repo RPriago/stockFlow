@@ -65,6 +65,20 @@ export default function UsersPage() {
     fetchUsers();
   }, [fetchUsers]);
 
+  // Real-time auto-refresh across browsers
+  useEffect(() => {
+    const handleSync = (e: any) => {
+      const resource = e?.detail?.resource;
+      if (!resource || resource === 'users') {
+        fetchUsers();
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('stockflow-sync', handleSync);
+      return () => window.removeEventListener('stockflow-sync', handleSync);
+    }
+  }, [fetchUsers]);
+
   // Edit Form States
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [editName, setEditName] = useState('');

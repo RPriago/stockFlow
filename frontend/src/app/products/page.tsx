@@ -140,6 +140,23 @@ export default function ProductsPage() {
     }
   }, []);
 
+  // Real-time auto-refresh across browsers
+  useEffect(() => {
+    const handleSync = (e: any) => {
+      const resource = e?.detail?.resource;
+      if (!resource || resource === 'products' || resource === 'categories') {
+        fetchProducts();
+        if (resource === 'categories') {
+          fetchCategories();
+        }
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('stockflow-sync', handleSync);
+      return () => window.removeEventListener('stockflow-sync', handleSync);
+    }
+  }, [fetchProducts, fetchCategories]);
+
   // Open Add Modal
   const handleOpenAddModal = () => {
     setSelectedProduct(null);

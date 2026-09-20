@@ -237,6 +237,27 @@ export default function OutboundOrdersPage() {
     fetchOrders();
   }, [fetchOrders]);
 
+  // Real-time auto-refresh across browsers
+  useEffect(() => {
+    const handleSync = (e: any) => {
+      const resource = e?.detail?.resource;
+      if (
+        !resource ||
+        resource === 'sales_orders' ||
+        resource === 'products' ||
+        resource === 'warehouses' ||
+        resource === 'inventory'
+      ) {
+        fetchOrders();
+        fetchStats();
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('stockflow-sync', handleSync);
+      return () => window.removeEventListener('stockflow-sync', handleSync);
+    }
+  }, [fetchOrders, fetchStats]);
+
   // Format Currency (IDR)
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('id-ID', {

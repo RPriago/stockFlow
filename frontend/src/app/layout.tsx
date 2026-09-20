@@ -3,6 +3,7 @@ import './globals.css';
 import Script from 'next/script';
 import { AuthProvider } from '@/context/AuthContext';
 import { LanguageProvider } from '@/context/LanguageContext';
+import { RealtimeProvider } from '@/context/RealtimeContext';
 
 export const metadata: Metadata = {
   title: 'StockFlow — Warehouse Management System',
@@ -37,7 +38,9 @@ export default function RootLayout({
       </head>
       <body className="min-h-full flex flex-col bg-white text-[#1B1B1F] dark:bg-slate-950 dark:text-slate-100 antialiased">
         <LanguageProvider>
-          <AuthProvider>{children}</AuthProvider>
+          <AuthProvider>
+            <RealtimeProvider>{children}</RealtimeProvider>
+          </AuthProvider>
         </LanguageProvider>
       </body>
     </html>

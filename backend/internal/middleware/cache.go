@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"stockflow-backend/internal/events"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -63,6 +65,31 @@ func (w *cachedWriter) Write(b []byte) (int, error) {
 	return w.ResponseWriter.Write(b)
 }
 
+func extractResource(path string) string {
+	switch {
+	case strings.Contains(path, "/products"):
+		return "products"
+	case strings.Contains(path, "/categories"):
+		return "categories"
+	case strings.Contains(path, "/warehouses"):
+		return "warehouses"
+	case strings.Contains(path, "/locations"):
+		return "locations"
+	case strings.Contains(path, "/inventory"):
+		return "inventory"
+	case strings.Contains(path, "/purchase-orders"):
+		return "purchase_orders"
+	case strings.Contains(path, "/sales-orders") || strings.Contains(path, "/outbound-orders"):
+		return "sales_orders"
+	case strings.Contains(path, "/users"):
+		return "users"
+	case strings.Contains(path, "/notifications"):
+		return "notifications"
+	default:
+		return "general"
+	}
+}
+
 // CacheMiddleware returns a Gin middleware that caches successful GET responses for the given TTL.
 // Mutating methods (POST, PUT, DELETE, PATCH) automatically invalidate cached data upon 2xx status.
 func CacheMiddleware(defaultTTL time.Duration) gin.HandlerFunc {
@@ -72,12 +99,21 @@ func CacheMiddleware(defaultTTL time.Duration) gin.HandlerFunc {
 			c.Next()
 			if c.Writer.Status() >= 200 && c.Writer.Status() < 300 {
 				globalCache.InvalidateAll()
+
+				// Broadcast real-time change event to all connected SSE clients
+				resource := extractResource(c.Request.URL.Path)
+				events.GetBroker().Broadcast("data_changed", gin.H{
+					"resource":  resource,
+					"method":    c.Request.Method,
+					"path":      c.Request.URL.Path,
+					"timestamp": time.Now().UnixMilli(),
+				})
 			}
 			return
 		}
 
-		// Don't cache auth verification, health check, or notifications
-		if strings.HasPrefix(c.Request.URL.Path, "/api/v1/auth") || strings.HasPrefix(c.Request.URL.Path, "/api/v1/notifications") || c.Request.URL.Path == "/health" {
+		// Don't cache auth verification, health check, notifications, or SSE events
+		if strings.HasPrefix(c.Request.URL.Path, "/api/v1/auth") || strings.HasPrefix(c.Request.URL.Path, "/api/v1/notifications") || strings.HasPrefix(c.Request.URL.Path, "/api/v1/events") || c.Request.URL.Path == "/health" {
 			c.Next()
 			return
 		}

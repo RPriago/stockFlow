@@ -93,10 +93,12 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
     };
 
     window.addEventListener('stockflow-notification-refresh', handleRefresh);
+    window.addEventListener('stockflow-sync', handleRefresh);
     // Poll every 15 seconds for background updates
     const timer = setInterval(fetchNotifications, 15000);
     return () => {
       window.removeEventListener('stockflow-notification-refresh', handleRefresh);
+      window.removeEventListener('stockflow-sync', handleRefresh);
       clearInterval(timer);
     };
   }, [fetchNotifications]);

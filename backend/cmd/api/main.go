@@ -11,6 +11,7 @@ import (
 
 	"stockflow-backend/internal/config"
 	"stockflow-backend/internal/database"
+	"stockflow-backend/internal/events"
 	"stockflow-backend/internal/handler"
 	"stockflow-backend/internal/middleware"
 	"stockflow-backend/internal/models"
@@ -125,6 +126,11 @@ func main() {
 	v1 := router.Group("/api/v1")
 	v1.Use(middleware.CacheMiddleware(15 * time.Second))
 	{
+		// Real-time events SSE stream (Protected by AuthMiddleware)
+		v1.GET("/events", middleware.AuthMiddleware(cfg), func(c *gin.Context) {
+			events.GetBroker().ServeHTTP(c)
+		})
+
 		// Auth routes
 		authGroup := v1.Group("/auth")
 		{
