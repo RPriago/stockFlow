@@ -13,15 +13,6 @@
 
 ---
 
-## Try it yourself
-
-The link above is a live deployment, not a mockup. A few things worth actually testing rather than taking my word for:
-
-1. **Real-time sync across sessions** — open the app in two browser windows (or desktop + mobile). Create a product, receive a PO, or adjust stock in one window, and the other updates its tables and KPI counts without a manual refresh.
-2. **Overselling guard** — try allocating more items into a bin than its capacity allows, or submit two conflicting sales orders against the same low-stock item, to see the reservation logic reject the second one.
-3. **KPI recalculation** — switch the dashboard's time range between *Today*, *7 Days*, *This Month*, and *All Time* and check that the period-over-period percentages actually recalculate rather than staying static.
-4. **Small-screen layout** — the UI is tested down to ~344px wide (Galaxy Z Fold cover screen), where notification and toolbar layouts switch to a stacked/sheet layout.
-
 ## The problem this is solving
 
 A lot of simple warehouse software treats inventory as a single mutable `quantity` column updated by raw `UPDATE` queries. Once multiple people are picking, packing, and receiving at the same time, that approach tends to produce race conditions, phantom stock, overselling, and bins that silently go over capacity.
