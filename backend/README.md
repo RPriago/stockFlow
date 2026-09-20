@@ -7,6 +7,7 @@ The core Go service powering StockFlow's real-time warehouse management system. 
 ## Architecture Overview
 
 The backend follows a strict layered architecture:
+
 - **`cmd/api/`**: Main entrypoint initializing configuration, MongoDB Atlas connection pooling, routes, and middleware.
 - **`cmd/chaos/`**: Concurrency benchmarking and fault-injection test suite (2,000 requests, 50-buyer inventory contention).
 - **`internal/events/`**: Non-blocking `EventBroker` managing SSE client connections, channel fan-out, and 20s heartbeat pings.
@@ -48,32 +49,37 @@ Copy the sample environment file:
 cp .env.example .env
 ```
 
-| Key | Default | Description |
-| :--- | :--- | :--- |
-| `PORT` | `8080` | HTTP port to listen on |
-| `MONGO_URI` | — | MongoDB Atlas connection URI |
-| `DB_NAME` | `stockflow` | Target database name |
-| `JWT_SECRET` | — | Cryptographic secret for signing tokens |
-| `USE_IN_MEMORY_DB` | `false` | Enable fallback in-memory store for offline dev/tests |
-| `CORS_ORIGIN` | `http://localhost:3000` | Allowed frontend CORS origins |
+| Key                | Default                 | Description                                           |
+| :----------------- | :---------------------- | :---------------------------------------------------- |
+| `PORT`             | `8080`                  | HTTP port to listen on                                |
+| `MONGO_URI`        | —                       | MongoDB Atlas connection URI                          |
+| `DB_NAME`          | `stockflow`             | Target database name                                  |
+| `JWT_SECRET`       | —                       | Cryptographic secret for signing tokens               |
+| `USE_IN_MEMORY_DB` | `false`                 | Enable fallback in-memory store for offline dev/tests |
+| `CORS_ORIGIN`      | `https://stock-flow-brown.vercel.app` | Allowed frontend CORS origins                         |
 
 ---
 
 ## Running the Backend
 
 ### Local Development
+
 ```bash
 go run cmd/api/main.go
 ```
 
 ### Running Tests
+
 Execute the comprehensive test suite with the race detector enabled:
+
 ```bash
 go test -v -race ./...
 ```
 
 ### Running Chaos & Load Tests
+
 Verify system resilience against overselling and high concurrent load:
+
 ```bash
 go run cmd/chaos/main.go
 ```

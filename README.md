@@ -7,7 +7,25 @@
 [![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248?style=flat-square&logo=mongodb&logoColor=white)](https://www.mongodb.com)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 
-[Live Demo](https://stock-flow-brown.vercel.app/) • [Architecture](#system-architecture) • [Workflows](#operational-workflows) • [Real-Time Sync](#real-time-event-synchronization) • [Benchmarks](#concurrency--chaos-benchmarks) • [Setup Guide](#local-setup)
+**[🚀 Launch Live Application: https://stock-flow-brown.vercel.app/](https://stock-flow-brown.vercel.app/)**
+
+[Live Platform](#live-application) • [Architecture](#system-architecture) • [Workflows](#operational-workflows) • [Real-Time Sync](#real-time-event-synchronization) • [Benchmarks](#concurrency--chaos-benchmarks) • [Developer Setup](#developer-setup)
+
+---
+
+## Live Application
+
+The platform is deployed and fully operational in production for live testing and review:
+
+> **Production URL**: **[https://stock-flow-brown.vercel.app/](https://stock-flow-brown.vercel.app/)**
+> 
+> *Frontend hosted on Vercel Edge Network, Backend containerized on Render, Database backed by MongoDB Atlas.*
+
+### Highlights for Reviewers & Recruiters
+1. **Cross-Browser Real-Time Sync**: Open the app in two separate browser windows (or on desktop and mobile simultaneously). When you create a product, complete an inbound PO, or execute a stock adjustment in Window 1, Window 2 immediately updates its tables and KPI counts without any manual page reload.
+2. **Preventing Overselling & Bin Quotas**: Try allocating items into storage bins to test physical capacity boundaries, or submit conflicting sales orders to test atomic stock reservation guards.
+3. **Dynamic KPI Velocity**: Toggle the dashboard time range between *Today*, *7 Days*, *This Month*, and *All Time* to verify real period-over-period percentage growth calculations.
+4. **Mobile & Foldable Responsive Experience**: The interface automatically adjusts its layout for compact viewports down to 344px (e.g. Galaxy Z Fold 5 cover screens), providing centered notification sheets and flexible toolbars.
 
 ---
 
@@ -67,7 +85,8 @@ StockFlow was engineered from the ground up to solve these specific distributed-
 
 ## System Architecture
 
-%%{init: {'flowchart': {'curve': 'stepAfter'}}}%%
+```mermaid
+%%{init: {"flowchart": {"curve": "stepAfter"}}}%%
 flowchart TD
     subgraph ClientLayer ["Client Layer (Next.js 16 App Router)"]
         UI["Web UI (Tailwind CSS v4)"]
@@ -104,10 +123,11 @@ flowchart TD
         Repos -. Testing/Offline .-> MemStore
     end
 
-    ApiClient -->|"HTTP REST API"| GatewayLayer
-    RTContext <-->|"SSE Stream /api/v1/events"| Broker
+    ApiClient -->|"HTTP REST API"| CORS
+    Broker -->|"SSE Stream /api/v1/events"| RTContext
     CacheMW -->|"Cache Miss or Mutation"| Handlers
     CacheMW -.->|"Cache Hit (0.8ms)"| ApiClient
+```
 
 ---
 
@@ -115,7 +135,8 @@ flowchart TD
 
 ### Procurement & Fulfillment Flow
 
-%%{init: {'flowchart': {'curve': 'stepAfter'}}}%%
+```mermaid
+%%{init: {"flowchart": {"curve": "stepAfter"}}}%%
 flowchart LR
     subgraph INBOUND ["1. Inbound Procurement"]
         PO1["Create PO (Draft)"] --> PO2["Send to Supplier (Ordered)"]
@@ -136,12 +157,14 @@ flowchart LR
         SO4 --> SO5["Carrier Dispatch (Shipped)"]
         SO5 --> SO6["Delivered to Customer"]
     end
+```
 
 ---
 
 ## Real-Time Event Synchronization
 
-%%{init: {'flowchart': {'curve': 'stepAfter'}}}%%
+```mermaid
+%%{init: {"flowchart": {"curve": "stepAfter"}}}%%
 flowchart TD
     subgraph UserA ["User A (Browser 1)"]
         ActionA["Mutates Data (Add Product / Inbound PO / Bin Move)"]
@@ -174,6 +197,7 @@ flowchart TD
     end
 
     ActionA -->|"HTTP Mutation"| API
+```
 
 ---
 
@@ -220,7 +244,7 @@ Stress and race-condition tests were executed using the integrated chaos testing
 | **Malformed Auth Flooding** | 500 simultaneous forged JWT tokens | 100% rejected with HTTP 401 in <0.2 ms per request |
 | **Race Detector Verification** | Full test suite run via `go test -race -v ./...` | 0 data races detected across all services, brokers, and middleware |
 
-*Note: Benchmarks reflect local execution runs on Apple Silicon (M-series); production figures may vary based on cloud network latency and host resources.*
+*Note: Benchmarks reflect execution on Apple Silicon (M-series); production figures may vary based on cloud host resources.*
 
 ---
 
@@ -240,12 +264,12 @@ Stress and race-condition tests were executed using the integrated chaos testing
 
 ---
 
-## Local Setup
+## Developer Setup
 
 ### Prerequisites
 - **Go 1.24+** installed locally ([golang.org](https://golang.org))
 - **Node.js 20.x+** and **npm** ([nodejs.org](https://nodejs.org))
-- A running **MongoDB** instance (local instance or MongoDB Atlas URI) — *or use in-memory mode without any DB setup*
+- A running **MongoDB** instance (or set `USE_IN_MEMORY_DB=true` to run without MongoDB)
 
 ### 1. Clone the Repository
 ```bash
@@ -253,7 +277,7 @@ git clone https://github.com/RPriago/stockFlow.git
 cd stockFlow
 ```
 
-### 2. Backend Setup
+### 2. Backend Configuration
 ```bash
 cd backend
 cp .env.example .env
@@ -262,19 +286,19 @@ cp .env.example .env
 Configure `backend/.env`:
 ```env
 PORT=8080
-MONGO_URI=mongodb+srv://<user>:<password>@cluster.mongodb.net/?retryWrites=true&w=majority
+MONGO_URI=your_mongodb_connection_string
 DB_NAME=stockflow
 JWT_SECRET=your_super_secret_jwt_key_min_32_chars
-USE_IN_MEMORY_DB=false    # Set to true to test locally without MongoDB
-CORS_ORIGIN=http://localhost:3000
+USE_IN_MEMORY_DB=false
+CORS_ORIGIN=https://stock-flow-brown.vercel.app
 ```
 
-Run the backend server:
+Run the backend:
 ```bash
 go run cmd/api/main.go
 ```
 
-### 3. Frontend Setup
+### 3. Frontend Configuration
 In a separate terminal:
 ```bash
 cd frontend
@@ -283,29 +307,27 @@ cp .env.local.example .env.local
 
 Configure `frontend/.env.local`:
 ```env
-NEXT_PUBLIC_API_URL=http://localhost:8080/api/v1
+NEXT_PUBLIC_API_URL=https://your-backend-domain.onrender.com/api/v1
 ```
 
-Install dependencies and start the Next.js development server:
+Install dependencies and start the dev server:
 ```bash
 npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
-
-### 4. Initial Administrator Seed Account
-On its very first launch against a clean database, StockFlow automatically provisions an initial Super Admin account:
-- The system prints the generated temporary credentials **once to the server console log**.
-- Log in using those credentials, immediately navigate to **Team Management** (`/users`), and update your password.
+### 4. Administrator Provisioning
+On first startup against a new database, StockFlow provisions an initial Super Admin account:
+- The system generates and prints the one-time temporary credentials to the server console log.
+- Sign in to the application and navigate to **Team Management** (`/users`) to create operational staff accounts or update passwords.
 
 ---
 
 ## Production Deployment
 
-- **Frontend**: Continuously deployed on [Vercel](https://vercel.com)
-- **Backend**: Containerized and hosted on [Render](https://render.com)
-- **Database**: [MongoDB Atlas](https://www.mongodb.com/atlas) with multi-region replication
+- **Web Application**: **[https://stock-flow-brown.vercel.app/](https://stock-flow-brown.vercel.app/)**
+- **Backend API**: Hosted as a containerized service on [Render](https://render.com)
+- **Database**: [MongoDB Atlas](https://www.mongodb.com/atlas) with automated backups and replica sets
 
 ---
 

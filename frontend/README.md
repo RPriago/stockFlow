@@ -71,7 +71,7 @@ cp .env.local.example .env.local
 Set the backend API endpoint in `.env.local`:
 
 ```env
-NEXT_PUBLIC_API_URL=http://localhost:8080/api/v1
+NEXT_PUBLIC_API_URL=https://your-backend-api.onrender.com/api/v1
 ```
 
 ### 2. Install Dependencies
@@ -86,7 +86,7 @@ npm install
 npm run dev
 ```
 
-The application will be accessible at [http://localhost:3000](http://localhost:3000).
+The live production deployment is accessible at **[https://stock-flow-brown.vercel.app/](https://stock-flow-brown.vercel.app/)**.
 
 ---
 
