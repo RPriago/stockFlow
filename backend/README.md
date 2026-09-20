@@ -49,13 +49,13 @@ Copy the sample environment file:
 cp .env.example .env
 ```
 
-| Key                | Default                 | Description                                           |
-| :----------------- | :---------------------- | :---------------------------------------------------- |
-| `PORT`             | `8080`                  | HTTP port to listen on                                |
-| `MONGO_URI`        | —                       | MongoDB Atlas connection URI                          |
-| `DB_NAME`          | `stockflow`             | Target database name                                  |
-| `JWT_SECRET`       | —                       | Cryptographic secret for signing tokens               |
-| `USE_IN_MEMORY_DB` | `false`                 | Enable fallback in-memory store for offline dev/tests |
+| Key                | Default                               | Description                                           |
+| :----------------- | :------------------------------------ | :---------------------------------------------------- |
+| `PORT`             | `8080`                                | HTTP port to listen on                                |
+| `MONGO_URI`        | —                                     | MongoDB Atlas connection URI                          |
+| `DB_NAME`          | `stockflow`                           | Target database name                                  |
+| `JWT_SECRET`       | —                                     | Cryptographic secret for signing tokens               |
+| `USE_IN_MEMORY_DB` | `false`                               | Enable fallback in-memory store for offline dev/tests |
 | `CORS_ORIGIN`      | `https://stock-flow-brown.vercel.app` | Allowed frontend CORS origins                         |
 
 ---

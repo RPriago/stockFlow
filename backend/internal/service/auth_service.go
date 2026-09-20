@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"log"
 	"time"
 
 	"stockflow-backend/internal/config"
@@ -139,7 +138,6 @@ func (s *authService) SeedInitialAdmin(ctx context.Context) error {
 		return nil
 	}
 
-	log.Printf("No users found. Seeding initial Super Admin (%s)...\n", s.cfg.InitialAdminEmail)
 	hash, err := utils.HashPassword(s.cfg.InitialAdminPassword)
 	if err != nil {
 		return err
@@ -157,7 +155,6 @@ func (s *authService) SeedInitialAdmin(ctx context.Context) error {
 		return err
 	}
 
-	log.Println("Initial Super Admin successfully seeded.")
 	return nil
 }
 

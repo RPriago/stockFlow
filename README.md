@@ -15,12 +15,15 @@
 
 ## Try it yourself
 
-The link above is a live deployment, not a mockup. A few things worth actually testing rather than taking my word for:
+The link above is a live deployment, not a mockup. A few things worth testing:
 
-1. **Real-time sync across sessions** — open the app in two browser windows (or desktop + mobile). Create a product, receive a PO, or adjust stock in one window, and the other updates its tables and KPI counts without a manual refresh.
-2. **Overselling guard** — try allocating more items into a bin than its capacity allows, or submit two conflicting sales orders against the same low-stock item, to see the reservation logic reject the second one.
-3. **KPI recalculation** — switch the dashboard's time range between *Today*, *7 Days*, *This Month*, and *All Time* and check that the period-over-period percentages actually recalculate rather than staying static.
-4. **Small-screen layout** — the UI is tested down to ~344px wide (Galaxy Z Fold cover screen), where notification and toolbar layouts switch to a stacked/sheet layout.
+1. **Direct evaluator registration** — create an account at [stock-flow-brown.vercel.app/register](https://stock-flow-brown.vercel.app/register) with the **Warehouse Manager** role. Managers have full operational access to every module (catalog, bin locations, inventory movements, PO intake, SO fulfillment, analytics, real-time sync) without needing administrative access.
+2. **Real-time sync across sessions** — open the app in two browser windows (or desktop + mobile). Create a product, receive a PO, or adjust stock in one window, and the other updates its tables and KPI counts without a manual refresh.
+3. **Overselling guard & bin quotas** — try allocating more items into a bin than its capacity allows, or submit two conflicting sales orders against the same low-stock item, to see the reservation logic reject the second one.
+4. **KPI recalculation** — switch the dashboard's time range between *Today*, *7 Days*, *This Month*, and *All Time* and check that the period-over-period percentages actually recalculate rather than staying static.
+5. **Small-screen layout** — the UI is tested down to ~344px wide (Galaxy Z Fold cover screen), where notification and toolbar layouts switch to a stacked/sheet layout.
+
+---
 
 ## The problem this is solving
 
@@ -30,6 +33,8 @@ StockFlow's design decisions come from trying to avoid those specific failure mo
 1. Stock reservations and dispatches go through an atomic check against the real available balance before they're granted, so contention doesn't lead to overselling.
 2. Physical quantity changes are recorded as an append-only ledger (`IN`, `OUT`, `ADJUST`, `RESERVE`, `TRANSFER`), so any unit on a shelf can be traced back to the order or adjustment that put it there.
 3. When one person completes a shipment or receives a pallet, every other connected browser tab reflects the updated stock and KPI numbers immediately, without polling.
+
+---
 
 ## Core Capabilities
 
@@ -51,6 +56,8 @@ A bell counter that updates live when stock drops below a safety threshold or an
 
 ### i18n, dark mode, responsive layout
 Full English/Indonesian switching across every screen, modal, and error message. Theme preference is read from local storage and system settings before first paint, so there's no light-to-dark flash on load. Layouts are tested down to ~340px width, including foldable-phone cover screens.
+
+---
 
 ## System Architecture
 
@@ -96,42 +103,39 @@ flowchart TD
     Broker -->|"SSE Stream /api/v1/events"| RTContext
     CacheMW -->|"Cache Miss or Mutation"| Handlers
     CacheMW -.->|"Cache Hit (0.8ms)"| ApiClient
-
-    style ClientLayer fill:none,stroke:none
-    style GatewayLayer fill:none,stroke:none
-    style BackendCore fill:none,stroke:none
-    style StorageLayer fill:none,stroke:none
 ```
 
+---
+
 ## Operational Workflows
+
+### Procurement & Fulfillment Flow
 
 ```mermaid
 %%{init: {"flowchart": {"curve": "stepAfter"}}}%%
 flowchart LR
-    subgraph INBOUND ["Inbound Procurement"]
+    subgraph INBOUND ["1. Inbound Procurement"]
         PO1["Create PO (Draft)"] --> PO2["Send to Supplier (Ordered)"]
         PO2 --> PO3["Goods Receipt & QC"]
         PO3 --> PO4["Bin Assignment & Capacity Check"]
     end
 
-    subgraph CORE ["Inventory Balance & Ledger"]
+    subgraph CORE ["2. Inventory Balance & Ledger"]
         PO4 -->|"Stock IN (+Qty)"| BAL[("Physical Inventory Balance")]
         BAL --- LEDGER[("Movement Audit Ledger")]
         BAL -->|"Stock Reservation"| SO2
     end
 
-    subgraph OUTBOUND ["Outbound Order Fulfillment"]
+    subgraph OUTBOUND ["3. Outbound Order Fulfillment"]
         SO1["Sales Order Created (Draft)"] --> SO2["Confirm Order & Reserve Stock"]
         SO2 --> SO3["Warehouse Picking"]
         SO3 --> SO4["Packing & Verification"]
         SO4 --> SO5["Carrier Dispatch (Shipped)"]
         SO5 --> SO6["Delivered to Customer"]
     end
-
-    style INBOUND fill:none,stroke:none
-    style CORE fill:none,stroke:none
-    style OUTBOUND fill:none,stroke:none
 ```
+
+---
 
 ## Real-Time Event Synchronization
 
@@ -159,7 +163,7 @@ flowchart TD
         Broker -->|"SSE data_changed: any"| ClientD
     end
 
-    subgraph ClientSync ["Client Auto-Refresh (No Polling)"]
+    subgraph ClientSync ["Client Auto-Refresh (Zero Polling)"]
         RefetchB["Selective Background Fetch"]
         RefetchC["Selective Background Fetch"]
         RefetchD["Recalculate KPI Velocities"]
@@ -169,18 +173,13 @@ flowchart TD
     end
 
     ActionA -->|"HTTP Mutation"| API
-
-    style UserA fill:none,stroke:none
-    style Backend fill:none,stroke:none
-    style Clients fill:none,stroke:none
-    style ClientSync fill:none,stroke:none
 ```
+
+---
 
 ## Role-Based Access Matrix
 
-Enforced at both the API middleware level and the frontend navigation level:
-
-| Feature / Module | Super Admin | Warehouse Manager | Warehouse Staff |
+| Feature | Super Admin | Warehouse Manager | Warehouse Staff |
 | :--- | :---: | :---: | :---: |
 | System settings & user provisioning | Full | — | — |
 | Warehouse & bin creation | Full | Full | Read only |
@@ -193,6 +192,8 @@ Enforced at both the API middleware level and the frontend navigation level:
 | Order picking, packing, shipping | Full | Full | Full |
 | Dashboard analytics | Full | Full | Summary only |
 
+---
+
 ## In-Memory Caching Strategy
 
 Instead of adding Redis for a deployment this size, StockFlow uses a lock-striped in-memory cache (`backend/internal/middleware/cache.go`):
@@ -201,6 +202,8 @@ Instead of adding Redis for a deployment this size, StockFlow uses a lock-stripe
 - A successful mutation (`POST`/`PUT`/`DELETE`/`PATCH` returning 2xx) purges only the cache partition for that resource family (`products`, `inventory`, `warehouses`, `purchase-orders`, `sales-orders`), not the whole cache.
 - Because invalidation happens before the response completes, the next read after a write won't come back stale.
 - Auth endpoints, health checks, and the SSE stream bypass the cache entirely.
+
+---
 
 ## Concurrency & Chaos Benchmarks
 
@@ -216,11 +219,15 @@ Run via the chaos testing suite in `backend/cmd/chaos/main.go`:
 
 *Run on Apple Silicon locally — production numbers on the actual host will vary.*
 
+---
+
 ## Tech Stack
 
 **Backend** — Go 1.24+, Gin, MongoDB Go Driver (replica set connection pooling), golang-jwt/jwt/v5 with bcrypt.
 
 **Frontend** — Next.js 16.3 (App Router, RSC), TypeScript 5.0+, Tailwind CSS v4, Lucide React.
+
+---
 
 ## Developer Setup
 
@@ -265,12 +272,16 @@ npm install
 npm run dev
 ```
 
-### 4. First-run admin
-On first run against a fresh database, StockFlow generates a Super Admin account and prints the one-time credentials to the server console log — they're never hardcoded in the repo. Log in with those, then create real staff accounts under **Team Management** (`/users`).
+### 4. Operational Testing
+Evaluators can register directly via the web interface (`/register`) selecting **Warehouse Manager** or **Warehouse Staff** for operational testing without administrative credential exposure.
+
+---
 
 ## Hosting
 
 Frontend on Vercel's edge network, backend as a containerized service on Render, database on MongoDB Atlas with automated backups.
+
+---
 
 ## License
 
