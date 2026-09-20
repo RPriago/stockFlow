@@ -28,6 +28,28 @@ interface NavbarProps {
   onMenuToggle: () => void;
 }
 
+// Module-level cache to prevent flicker/glitch during client-side navigation
+let cachedUnreadCount = 0;
+let cachedNotifications: Notification[] = [];
+
+if (typeof window !== 'undefined') {
+  try {
+    const saved = localStorage.getItem('stockflow-unread-count');
+    if (saved !== null) {
+      cachedUnreadCount = parseInt(saved, 10) || 0;
+    }
+  } catch {}
+}
+
+const updateCachedUnreadCount = (count: number) => {
+  cachedUnreadCount = count;
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('stockflow-unread-count', count.toString());
+    } catch {}
+  }
+};
+
 export default function Navbar({ onMenuToggle }: NavbarProps) {
   const { user } = useAuth();
   const { language, setLanguage, t } = useLanguage();
@@ -39,8 +61,8 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
   const [showNotifPopover, setShowNotifPopover] = useState(false);
   const [notifFilter, setNotifFilter] = useState<'all' | 'unread'>('all');
 
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [unreadCount, setUnreadCount] = useState<number>(0);
+  const [notifications, setNotifications] = useState<Notification[]>(cachedNotifications);
+  const [unreadCount, setUnreadCount] = useState<number>(cachedUnreadCount);
   const [isLoadingNotifs, setIsLoadingNotifs] = useState(false);
 
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -51,8 +73,12 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
     try {
       const res = await api.get<NotificationSummary>('/notifications');
       if (res.success && res.data) {
-        setNotifications(res.data.notifications || []);
-        setUnreadCount(res.data.unread_count || 0);
+        const notifs = res.data.notifications || [];
+        const count = res.data.unread_count || 0;
+        cachedNotifications = notifs;
+        updateCachedUnreadCount(count);
+        setNotifications(notifs);
+        setUnreadCount(count);
       }
     } catch (err) {
       console.error('Failed to fetch notifications:', err);
@@ -110,10 +136,16 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
     if (notif.is_read) return;
 
     // Optimistic update
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === notif.id ? { ...n, is_read: true } : n))
-    );
-    setUnreadCount((prev) => Math.max(0, prev - 1));
+    setNotifications((prev) => {
+      const next = prev.map((n) => (n.id === notif.id ? { ...n, is_read: true } : n));
+      cachedNotifications = next;
+      return next;
+    });
+    setUnreadCount((prev) => {
+      const next = Math.max(0, prev - 1);
+      updateCachedUnreadCount(next);
+      return next;
+    });
 
     try {
       await api.patch(`/notifications/${notif.id}/read`, {});
@@ -127,7 +159,12 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
   const handleMarkAllAsRead = async () => {
     if (unreadCount === 0) return;
 
-    setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    setNotifications((prev) => {
+      const next = prev.map((n) => ({ ...n, is_read: true }));
+      cachedNotifications = next;
+      return next;
+    });
+    updateCachedUnreadCount(0);
     setUnreadCount(0);
 
     try {
@@ -146,9 +183,17 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
     const wasUnread = target && !target.is_read;
 
     // Optimistic delete
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    setNotifications((prev) => {
+      const next = prev.filter((n) => n.id !== id);
+      cachedNotifications = next;
+      return next;
+    });
     if (wasUnread) {
-      setUnreadCount((prev) => Math.max(0, prev - 1));
+      setUnreadCount((prev) => {
+        const next = Math.max(0, prev - 1);
+        updateCachedUnreadCount(next);
+        return next;
+      });
     }
 
     try {
@@ -330,7 +375,7 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
 
             {/* Red dot badge only shows when there are unread notifications */}
             {unreadCount > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[#F04452] text-white text-[10px] font-extrabold flex items-center justify-center ring-2 ring-white dark:ring-slate-900 animate-in fade-in zoom-in-75 duration-200">
+              <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[#F04452] text-white text-[10px] font-extrabold flex items-center justify-center ring-2 ring-white dark:ring-slate-900">
                 {unreadCount > 9 ? '9+' : unreadCount}
               </span>
             )}
