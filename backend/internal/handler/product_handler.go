@@ -34,11 +34,6 @@ func (h *ProductHandler) ListProducts(c *gin.Context) {
 	includeDeleted, _ := strconv.ParseBool(c.DefaultQuery("include_deleted", "false"))
 
 	params := models.ProductQueryParam{
-		Search:       search,
-		CategoryID:   categoryID,
-		LowStockOnly: lowStockOnly,
-		Page:         page,
-		Limit:        limit,
 		Search:         search,
 		CategoryID:     categoryID,
 		LowStockOnly:   lowStockOnly,

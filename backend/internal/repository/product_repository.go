@@ -68,7 +68,6 @@ func (r *mongoProductRepository) CreateProduct(ctx context.Context, product *mod
 
 func (r *mongoProductRepository) FindProductByID(ctx context.Context, id primitive.ObjectID) (*models.Product, error) {
 	var product models.Product
-	err := r.productColl.FindOne(ctx, bson.M{"_id": id}).Decode(&product)
 	err := r.productColl.FindOne(ctx, bson.M{"_id": id, "is_deleted": bson.M{"$ne": true}}).Decode(&product)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
@@ -81,7 +80,6 @@ func (r *mongoProductRepository) FindProductByID(ctx context.Context, id primiti
 
 func (r *mongoProductRepository) FindProductBySKU(ctx context.Context, sku string) (*models.Product, error) {
 	var product models.Product
-	err := r.productColl.FindOne(ctx, bson.M{"sku": sku}).Decode(&product)
 	err := r.productColl.FindOne(ctx, bson.M{"sku": sku, "is_deleted": bson.M{"$ne": true}}).Decode(&product)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
@@ -122,7 +120,6 @@ func (r *mongoProductRepository) FindProducts(ctx context.Context, params models
 		page = 1
 	}
 	limit := params.Limit
-	if limit < 1 || limit > 100 {
 	if limit < 1 {
 		limit = 10
 	} else if limit > 500 {
@@ -188,7 +185,6 @@ func (r *mongoProductRepository) UpdateProduct(ctx context.Context, id primitive
 }
 
 func (r *mongoProductRepository) DeleteProduct(ctx context.Context, id primitive.ObjectID) error {
-	res, err := r.productColl.DeleteOne(ctx, bson.M{"_id": id})
 	now := time.Now()
 	res, err := r.productColl.UpdateOne(ctx, bson.M{"_id": id}, bson.M{
 		"$set": bson.M{
@@ -199,7 +195,6 @@ func (r *mongoProductRepository) DeleteProduct(ctx context.Context, id primitive
 	if err != nil {
 		return err
 	}
-	if res.DeletedCount == 0 {
 	if res.MatchedCount == 0 {
 		return ErrProductNotFound
 	}
@@ -207,7 +202,6 @@ func (r *mongoProductRepository) DeleteProduct(ctx context.Context, id primitive
 }
 
 func (r *mongoProductRepository) CountProducts(ctx context.Context) (int64, error) {
-	return r.productColl.CountDocuments(ctx, bson.M{})
 	return r.productColl.CountDocuments(ctx, bson.M{"is_deleted": bson.M{"$ne": true}})
 }
 

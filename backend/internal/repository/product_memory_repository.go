@@ -6,8 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"stockflow-backend/internal/models"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 type productMemoryRepository struct {
@@ -29,7 +30,6 @@ func (r *productMemoryRepository) CreateProduct(ctx context.Context, product *mo
 
 	// SKU uniqueness check
 	for _, p := range r.products {
-		if strings.EqualFold(p.SKU, product.SKU) {
 		if !p.IsDeleted && strings.EqualFold(p.SKU, product.SKU) {
 			return ErrProductSKUExists
 		}
@@ -52,7 +52,6 @@ func (r *productMemoryRepository) FindProductByID(ctx context.Context, id primit
 	defer r.mu.RUnlock()
 
 	p, exists := r.products[id]
-	if !exists {
 	if !exists || p.IsDeleted {
 		return nil, ErrProductNotFound
 	}
@@ -65,7 +64,6 @@ func (r *productMemoryRepository) FindProductBySKU(ctx context.Context, sku stri
 	defer r.mu.RUnlock()
 
 	for _, p := range r.products {
-		if strings.EqualFold(p.SKU, sku) {
 		if !p.IsDeleted && strings.EqualFold(p.SKU, sku) {
 			copied := *p
 			return &copied, nil
@@ -111,7 +109,6 @@ func (r *productMemoryRepository) FindProducts(ctx context.Context, params model
 		page = 1
 	}
 	limit := params.Limit
-	if limit < 1 || limit > 100 {
 	if limit < 1 {
 		limit = 10
 	} else if limit > 500 {
@@ -142,7 +139,6 @@ func (r *productMemoryRepository) UpdateProduct(ctx context.Context, id primitiv
 
 	// Check SKU uniqueness if changed
 	for otherID, p := range r.products {
-		if otherID != id && strings.EqualFold(p.SKU, product.SKU) {
 		if otherID != id && !p.IsDeleted && strings.EqualFold(p.SKU, product.SKU) {
 			return ErrProductSKUExists
 		}
@@ -161,12 +157,10 @@ func (r *productMemoryRepository) DeleteProduct(ctx context.Context, id primitiv
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, exists := r.products[id]; !exists {
 	p, exists := r.products[id]
 	if !exists {
 		return ErrProductNotFound
 	}
-	delete(r.products, id)
 	now := time.Now()
 	p.IsDeleted = true
 	p.DeletedAt = &now
@@ -177,7 +171,6 @@ func (r *productMemoryRepository) CountProducts(ctx context.Context) (int64, err
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	return int64(len(r.products)), nil
 	var count int64
 	for _, p := range r.products {
 		if !p.IsDeleted {

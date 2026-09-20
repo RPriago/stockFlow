@@ -88,11 +88,6 @@ type UpdateProductRequest struct {
 }
 
 type ProductQueryParam struct {
-	Search       string
-	CategoryID   string
-	LowStockOnly bool
-	Page         int64
-	Limit        int64
 	Search         string
 	CategoryID     string
 	LowStockOnly   bool
