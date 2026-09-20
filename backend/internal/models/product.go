@@ -55,6 +55,8 @@ type Product struct {
 	CreatedBy    string             `bson:"created_by" json:"created_by"`
 	CreatedAt    time.Time          `bson:"created_at" json:"created_at"`
 	UpdatedAt    time.Time          `bson:"updated_at" json:"updated_at"`
+	IsDeleted    bool               `bson:"is_deleted,omitempty" json:"is_deleted,omitempty"`
+	DeletedAt    *time.Time         `bson:"deleted_at,omitempty" json:"deleted_at,omitempty"`
 }
 
 type CreateProductRequest struct {
@@ -91,6 +93,12 @@ type ProductQueryParam struct {
 	LowStockOnly bool
 	Page         int64
 	Limit        int64
+	Search         string
+	CategoryID     string
+	LowStockOnly   bool
+	IncludeDeleted bool
+	Page           int64
+	Limit          int64
 }
 
 type ProductListResponse struct {

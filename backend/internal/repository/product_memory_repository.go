@@ -30,6 +30,7 @@ func (r *productMemoryRepository) CreateProduct(ctx context.Context, product *mo
 	// SKU uniqueness check
 	for _, p := range r.products {
 		if strings.EqualFold(p.SKU, product.SKU) {
+		if !p.IsDeleted && strings.EqualFold(p.SKU, product.SKU) {
 			return ErrProductSKUExists
 		}
 	}
@@ -52,6 +53,7 @@ func (r *productMemoryRepository) FindProductByID(ctx context.Context, id primit
 
 	p, exists := r.products[id]
 	if !exists {
+	if !exists || p.IsDeleted {
 		return nil, ErrProductNotFound
 	}
 	copied := *p
@@ -64,6 +66,7 @@ func (r *productMemoryRepository) FindProductBySKU(ctx context.Context, sku stri
 
 	for _, p := range r.products {
 		if strings.EqualFold(p.SKU, sku) {
+		if !p.IsDeleted && strings.EqualFold(p.SKU, sku) {
 			copied := *p
 			return &copied, nil
 		}
@@ -79,6 +82,10 @@ func (r *productMemoryRepository) FindProducts(ctx context.Context, params model
 	searchLower := strings.ToLower(params.Search)
 
 	for _, p := range r.products {
+		if !params.IncludeDeleted && p.IsDeleted {
+			continue
+		}
+
 		// Category filter
 		if params.CategoryID != "" && p.CategoryID.Hex() != params.CategoryID {
 			continue
@@ -105,7 +112,10 @@ func (r *productMemoryRepository) FindProducts(ctx context.Context, params model
 	}
 	limit := params.Limit
 	if limit < 1 || limit > 100 {
+	if limit < 1 {
 		limit = 10
+	} else if limit > 500 {
+		limit = 500
 	}
 	skip := (page - 1) * limit
 
@@ -133,6 +143,7 @@ func (r *productMemoryRepository) UpdateProduct(ctx context.Context, id primitiv
 	// Check SKU uniqueness if changed
 	for otherID, p := range r.products {
 		if otherID != id && strings.EqualFold(p.SKU, product.SKU) {
+		if otherID != id && !p.IsDeleted && strings.EqualFold(p.SKU, product.SKU) {
 			return ErrProductSKUExists
 		}
 	}
@@ -151,9 +162,14 @@ func (r *productMemoryRepository) DeleteProduct(ctx context.Context, id primitiv
 	defer r.mu.Unlock()
 
 	if _, exists := r.products[id]; !exists {
+	p, exists := r.products[id]
+	if !exists {
 		return ErrProductNotFound
 	}
 	delete(r.products, id)
+	now := time.Now()
+	p.IsDeleted = true
+	p.DeletedAt = &now
 	return nil
 }
 
@@ -162,6 +178,13 @@ func (r *productMemoryRepository) CountProducts(ctx context.Context) (int64, err
 	defer r.mu.RUnlock()
 
 	return int64(len(r.products)), nil
+	var count int64
+	for _, p := range r.products {
+		if !p.IsDeleted {
+			count++
+		}
+	}
+	return count, nil
 }
 
 func (r *productMemoryRepository) CreateCategory(ctx context.Context, category *models.Category) error {

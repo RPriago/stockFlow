@@ -127,6 +127,7 @@ export default function DashboardPage() {
       try {
         const [prodRes, invRes, poRes, soRes, movRes, poListRes, soListRes] = await Promise.all([
           api.get<ProductListResult>('/products?page=1&limit=200'),
+          api.get<ProductListResult>('/products?page=1&limit=200&include_deleted=true'),
           api.get<InventoryStats>('/inventory/stats'),
           api.get<POStats>('/purchase-orders/stats'),
           api.get<SOStats>('/sales-orders/stats'),
@@ -138,6 +139,10 @@ export default function DashboardPage() {
         if (prodRes.success && prodRes.data) {
           setTotalProducts(prodRes.data.meta?.total ?? prodRes.data.products?.length ?? 0);
           setProductsList(prodRes.data.products || []);
+          const prods = prodRes.data.products || [];
+          const activeOnly = prods.filter((p) => !p.is_deleted);
+          setTotalProducts(activeOnly.length);
+          setProductsList(prods);
         }
         if (invRes.success && invRes.data) {
           setInvStats(invRes.data);
@@ -294,6 +299,12 @@ export default function DashboardPage() {
     // 1. Total Catalog Products (Catalog size and net growth vs baseline)
     const prodsBeforeCurrent = productsList.filter((p) => {
       return new Date(p.created_at) < currentStart;
+    const activeProductsNow = productsList.filter((p) => !p.is_deleted).length;
+    const activeProductsAtBaseline = productsList.filter((p) => {
+      const createdAt = new Date(p.created_at);
+      const isCreatedBefore = createdAt < currentStart;
+      const isDeletedBefore = p.is_deleted && p.deleted_at && new Date(p.deleted_at) < currentStart;
+      return isCreatedBefore && !isDeletedBefore;
     }).length;
     const prodsAddedInCurrent = productsList.filter((p) => {
       return new Date(p.created_at) >= currentStart;
@@ -306,6 +317,20 @@ export default function DashboardPage() {
       prodChange = (pct > 0 ? '+' : '') + pct.toFixed(1) + '%';
       prodIsPositive = true;
     } else if (prodsAddedInCurrent > 0) {
+    if (activeProductsAtBaseline > 0) {
+      const diff = activeProductsNow - activeProductsAtBaseline;
+      const pct = (diff / activeProductsAtBaseline) * 100;
+      if (diff > 0) {
+        prodChange = '+' + pct.toFixed(1) + '%';
+        prodIsPositive = true;
+      } else if (diff < 0) {
+        prodChange = pct.toFixed(1) + '%';
+        prodIsPositive = false;
+      } else {
+        prodChange = '+0.0%';
+        prodIsPositive = true;
+      }
+    } else if (activeProductsNow > 0) {
       prodChange = '+100.0%';
       prodIsPositive = true;
     }
@@ -345,6 +370,7 @@ export default function DashboardPage() {
       }
     } else {
       lowStockChange = '0.0%';
+      lowStockChange = '+0.0%';
       lowStockIsPositive = true;
     }
 
@@ -567,6 +593,9 @@ export default function DashboardPage() {
                   }`}
                 >
                   {m.isPositive ? (
+                  {m.change.startsWith('-') ? (
+                    <ArrowDown className="w-2.5 h-2.5 stroke-[2.5]" />
+                  ) : (
                     <ArrowUp className="w-2.5 h-2.5 stroke-[2.5]" />
                   ) : (
                     <ArrowDown className="w-2.5 h-2.5 stroke-[2.5]" />

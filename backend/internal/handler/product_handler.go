@@ -31,6 +31,7 @@ func (h *ProductHandler) ListProducts(c *gin.Context) {
 	search := c.Query("search")
 	categoryID := c.Query("category_id")
 	lowStockOnly, _ := strconv.ParseBool(c.DefaultQuery("low_stock", "false"))
+	includeDeleted, _ := strconv.ParseBool(c.DefaultQuery("include_deleted", "false"))
 
 	params := models.ProductQueryParam{
 		Search:       search,
@@ -38,6 +39,12 @@ func (h *ProductHandler) ListProducts(c *gin.Context) {
 		LowStockOnly: lowStockOnly,
 		Page:         page,
 		Limit:        limit,
+		Search:         search,
+		CategoryID:     categoryID,
+		LowStockOnly:   lowStockOnly,
+		IncludeDeleted: includeDeleted,
+		Page:           page,
+		Limit:          limit,
 	}
 
 	products, total, err := h.productService.ListProducts(c.Request.Context(), params)
