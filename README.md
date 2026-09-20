@@ -1,4 +1,4 @@
-# StockFlow — Modern Real-Time Warehouse Management System
+# StockFlow — Real-Time Warehouse Management System
 
 [![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat-square&logo=go&logoColor=white)](https://golang.org)
 [![Next.js](https://img.shields.io/badge/Next.js-16.3-black?style=flat-square&logo=next.js&logoColor=white)](https://nextjs.org)
@@ -7,81 +7,50 @@
 [![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248?style=flat-square&logo=mongodb&logoColor=white)](https://www.mongodb.com)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 
-**Launch Live Application:(https://stock-flow-brown.vercel.app/)**
+**Live demo:** [stock-flow-brown.vercel.app](https://stock-flow-brown.vercel.app/)
 
-[Live Platform](#live-application) • [Architecture](#system-architecture) • [Workflows](#operational-workflows) • [Real-Time Sync](#real-time-event-synchronization) • [Benchmarks](#concurrency--chaos-benchmarks) • [Developer Setup](#developer-setup)
-
----
-
-## Live Application
-
-The platform is deployed and fully operational in production for live testing and review:
-
-> **Production URL**: **[https://stock-flow-brown.vercel.app/](https://stock-flow-brown.vercel.app/)**
-> 
-> *Frontend hosted on Vercel Edge Network, Backend containerized on Render, Database backed by MongoDB Atlas.*
-
-### Highlights for Reviewers & Recruiters
-1. **Cross-Browser Real-Time Sync**: Open the app in two separate browser windows (or on desktop and mobile simultaneously). When you create a product, complete an inbound PO, or execute a stock adjustment in Window 1, Window 2 immediately updates its tables and KPI counts without any manual page reload.
-2. **Preventing Overselling & Bin Quotas**: Try allocating items into storage bins to test physical capacity boundaries, or submit conflicting sales orders to test atomic stock reservation guards.
-3. **Dynamic KPI Velocity**: Toggle the dashboard time range between *Today*, *7 Days*, *This Month*, and *All Time* to verify real period-over-period percentage growth calculations.
-4. **Mobile & Foldable Responsive Experience**: The interface automatically adjusts its layout for compact viewports down to 344px (e.g. Galaxy Z Fold 5 cover screens), providing centered notification sheets and flexible toolbars.
+[Architecture](#system-architecture) • [Workflows](#operational-workflows) • [Real-Time Sync](#real-time-event-synchronization) • [Benchmarks](#concurrency--chaos-benchmarks) • [Developer Setup](#developer-setup)
 
 ---
 
-## The Engineering Problem
+## Try it yourself
 
-Most open-source warehouse software treats inventory like a generic spreadsheet: a single mutable `quantity` column updated by raw `UPDATE` queries. In high-velocity environments where multiple floor workers pick, pack, and receive goods simultaneously, this approach inevitably causes race conditions, phantom inventory, overselling, and unallocated bin overflow.
+The link above is a live deployment, not a mockup. A few things worth actually testing rather than taking my word for:
 
-StockFlow was engineered from the ground up to solve these specific distributed-state challenges:
-1. **Zero Overselling Under Heavy Contention**: Atomic transactional checks verify real available balance before granting reservations or dispatches.
-2. **Deterministic Auditability**: Physical quantities are tracked through an append-only double-entry ledger (`IN`, `OUT`, `ADJUST`, `RESERVE`, `TRANSFER`), ensuring every single unit on a shelf maps back to a specific order or manual reconciliation.
-3. **Instant Multi-User State Synchronization**: When one warehouse associate completes a shipment or receives an intake pallet, all other associates' browser tabs immediately reflect the updated stock levels and KPI velocities without page reloads or polling bombardment.
+1. **Real-time sync across sessions** — open the app in two browser windows (or desktop + mobile). Create a product, receive a PO, or adjust stock in one window, and the other updates its tables and KPI counts without a manual refresh.
+2. **Overselling guard** — try allocating more items into a bin than its capacity allows, or submit two conflicting sales orders against the same low-stock item, to see the reservation logic reject the second one.
+3. **KPI recalculation** — switch the dashboard's time range between *Today*, *7 Days*, *This Month*, and *All Time* and check that the period-over-period percentages actually recalculate rather than staying static.
+4. **Small-screen layout** — the UI is tested down to ~344px wide (Galaxy Z Fold cover screen), where notification and toolbar layouts switch to a stacked/sheet layout.
 
----
+## The problem this is solving
+
+A lot of simple warehouse software treats inventory as a single mutable `quantity` column updated by raw `UPDATE` queries. Once multiple people are picking, packing, and receiving at the same time, that approach tends to produce race conditions, phantom stock, overselling, and bins that silently go over capacity.
+
+StockFlow's design decisions come from trying to avoid those specific failure modes:
+1. Stock reservations and dispatches go through an atomic check against the real available balance before they're granted, so contention doesn't lead to overselling.
+2. Physical quantity changes are recorded as an append-only ledger (`IN`, `OUT`, `ADJUST`, `RESERVE`, `TRANSFER`), so any unit on a shelf can be traced back to the order or adjustment that put it there.
+3. When one person completes a shipment or receives a pallet, every other connected browser tab reflects the updated stock and KPI numbers immediately, without polling.
 
 ## Core Capabilities
 
-### 1. Hierarchical Storage & Bin Capacity Management
-- **Five-tier Location Topology**: `Warehouse → Zone → Rack → Shelf → Bin`.
-- **Dimensional & Physical Capacity Enforcement**: Storage bins enforce maximum unit quotas. Inbound allocations reject attempts to overfill bins, displaying exact remaining capacities in real time.
-- **Visual Utilization Metrics**: Real-time bin occupancy bars and facility space tracking across multiple distributed logistics hubs.
+### Hierarchical storage & bin capacity
+Five-tier location model: `Warehouse → Zone → Rack → Shelf → Bin`. Bins enforce a maximum unit quota, and inbound allocations that would overfill a bin are rejected, with the remaining capacity shown in real time. Bin occupancy and facility space usage are visualized per warehouse.
 
-### 2. Multi-User Real-Time Sync (Server-Sent Events)
-- **Zero-Polling Event Stream**: A lightweight Go Gin broker (`/api/v1/events`) streams targeted `data_changed` events over long-lived HTTP connections using buffered Go channels.
-- **Near-Zero Memory Footprint**: 2,000 active concurrent connections consume less than 4 MB of RAM (each connection runs inside a native ~2 KB Go goroutine with no polling database queries).
-- **Thundering-Herd Shielding**: When multiple clients auto-refresh after an event, the backend's in-memory cache middleware serves the requests directly from RAM (`X-Cache: HIT`), preventing MongoDB Atlas connection starvation.
-- **Automatic Resilience**: Auto-reconnect with exponential backoff and 20-second heartbeat pings keeps streams alive through reverse proxies and cloud firewalls.
+### Multi-user sync via Server-Sent Events
+A Go/Gin broker at `/api/v1/events` streams `data_changed` events over long-lived HTTP connections using buffered channels, so clients don't need to poll. In testing, 2,000 concurrent connections held under 4MB of RAM, since each connection is just a ~2KB goroutine. When several clients refresh after the same event, the in-memory cache serves those requests directly (`X-Cache: HIT`) instead of each one hitting MongoDB. Streams auto-reconnect with backoff and a 20-second heartbeat to survive reverse proxies and firewalls closing idle connections.
 
-### 3. Strict Inbound & Outbound State Machines
-- **Purchase Order (PO) Lifecycle**: `Draft → Ordered → Received / Cancelled`.
-  - Line-item tracking with supplier catalog linking.
-  - Multi-bin receipt allocation: incoming goods can be received directly into designated warehouse bins with instant stock balance credit.
-- **Sales Order (SO) Lifecycle**: `Draft → Confirmed → Picking → Packing → Shipped → Delivered / Cancelled`.
-  - **Soft Stock Reservation**: Confirming an order locks inventory into a reserved state so subsequent orders cannot claim it.
-  - **Auto-Release on Cancellation**: Cancelling an in-flight order immediately returns all reserved items to the available bin balances.
+### Inbound & outbound state machines
+- **Purchase orders**: `Draft → Ordered → Received / Cancelled`, with line-item tracking, supplier linking, and multi-bin receipt allocation on intake.
+- **Sales orders**: `Draft → Confirmed → Picking → Packing → Shipped → Delivered / Cancelled`. Confirming an order puts a soft reservation on the inventory so later orders can't claim the same stock; cancelling releases that reservation back to available balance.
 
-### 4. Dynamic KPI Velocity Engine & Comparative Analytics
-- **5 Live Dashboard Metrics**:
-  - `Total Catalog Products`: Net catalog growth percentage accounting for soft-deleted items.
-  - `Total Stock on Hand`: Net balance delta derived from inbound vs. outbound physical movements.
-  - `Low-Stock Alerts`: Immediate ratio of products at or below safety stock thresholds.
-  - `Pending Inbound POs`: Active intake volume and velocity compared to previous period.
-  - `Active Outbound Orders`: Dispatch queue volume and fulfillment rate.
-- **Context-Aware Comparison Windows**: Automatically recalibrates metrics based on the active timeframe (`Today vs Yesterday`, `Last 7 Days vs Prev 7 Days`, `This Month vs Last Month`, `Last 30 Days vs Prev 30 Days`, `All Time vs Last Year`).
-- **Audit-Safe Soft Deletion**: Deleted products retain historical metrics (`is_deleted`, `deleted_at`) to ensure baseline comparative calculations remain accurate over time.
+### Dashboard KPIs with period comparison
+Five live metrics — total catalog products, total stock on hand, low-stock alerts, pending inbound POs, and active outbound orders — each compared against the previous equivalent period (today vs. yesterday, this month vs. last month, etc.). Soft-deleted products keep their historical data (`is_deleted`, `deleted_at`) so past comparisons don't get skewed by later deletions.
 
-### 5. Proactive Alerting & In-App Notification Center
-- **Dynamic Unread Badge**: Live bell counter updating instantly when inventory drops below safety thresholds or order states transition.
-- **Filterable Notification Drawer**: Filter by `All` or `Unread`, with batch mark-as-read, manual item deletion, and automated 72-hour TTL cleanup.
-- **Direct Action Links**: One-click navigation directly to affected SKU details or order inspection screens.
+### Notifications
+A bell counter that updates live when stock drops below a safety threshold or an order changes state. The notification drawer can filter by unread, supports batch mark-as-read and manual deletion, and old notifications clear out automatically after 72 hours. Each notification links directly to the affected SKU or order.
 
-### 6. Internationalization, Dark Mode & Responsive Design
-- **Bilingual Engine**: Seamless instant switching between English (EN) and Bahasa Indonesia (ID) across every screen, modal, error message, and badge.
-- **Flicker-Free Theme**: Dark and light modes backed by local storage and system preference detection with zero tab-switch glitching.
-- **Screen-Adaptive UX**: Custom layouts tested down to narrow viewports (<340px width, including foldable devices like Samsung Galaxy Z Fold 5 cover screen). Notifications and action bars automatically adapt into centered bottom sheets and wrapped toolbars.
-
----
+### i18n, dark mode, responsive layout
+Full English/Indonesian switching across every screen, modal, and error message. Theme preference is read from local storage and system settings before first paint, so there's no light-to-dark flash on load. Layouts are tested down to ~340px width, including foldable-phone cover screens.
 
 ## System Architecture
 
@@ -127,39 +96,42 @@ flowchart TD
     Broker -->|"SSE Stream /api/v1/events"| RTContext
     CacheMW -->|"Cache Miss or Mutation"| Handlers
     CacheMW -.->|"Cache Hit (0.8ms)"| ApiClient
+
+    style ClientLayer fill:none,stroke:none
+    style GatewayLayer fill:none,stroke:none
+    style BackendCore fill:none,stroke:none
+    style StorageLayer fill:none,stroke:none
 ```
 
----
-
 ## Operational Workflows
-
-### Procurement & Fulfillment Flow
 
 ```mermaid
 %%{init: {"flowchart": {"curve": "stepAfter"}}}%%
 flowchart LR
-    subgraph INBOUND ["1. Inbound Procurement"]
+    subgraph INBOUND ["Inbound Procurement"]
         PO1["Create PO (Draft)"] --> PO2["Send to Supplier (Ordered)"]
         PO2 --> PO3["Goods Receipt & QC"]
         PO3 --> PO4["Bin Assignment & Capacity Check"]
     end
 
-    subgraph CORE ["2. Inventory Balance & Ledger"]
+    subgraph CORE ["Inventory Balance & Ledger"]
         PO4 -->|"Stock IN (+Qty)"| BAL[("Physical Inventory Balance")]
         BAL --- LEDGER[("Movement Audit Ledger")]
         BAL -->|"Stock Reservation"| SO2
     end
 
-    subgraph OUTBOUND ["3. Outbound Order Fulfillment"]
+    subgraph OUTBOUND ["Outbound Order Fulfillment"]
         SO1["Sales Order Created (Draft)"] --> SO2["Confirm Order & Reserve Stock"]
         SO2 --> SO3["Warehouse Picking"]
         SO3 --> SO4["Packing & Verification"]
         SO4 --> SO5["Carrier Dispatch (Shipped)"]
         SO5 --> SO6["Delivered to Customer"]
     end
-```
 
----
+    style INBOUND fill:none,stroke:none
+    style CORE fill:none,stroke:none
+    style OUTBOUND fill:none,stroke:none
+```
 
 ## Real-Time Event Synchronization
 
@@ -187,7 +159,7 @@ flowchart TD
         Broker -->|"SSE data_changed: any"| ClientD
     end
 
-    subgraph ClientSync ["Client Auto-Refresh (Zero Polling)"]
+    subgraph ClientSync ["Client Auto-Refresh (No Polling)"]
         RefetchB["Selective Background Fetch"]
         RefetchC["Selective Background Fetch"]
         RefetchD["Recalculate KPI Velocities"]
@@ -197,93 +169,77 @@ flowchart TD
     end
 
     ActionA -->|"HTTP Mutation"| API
-```
 
----
+    style UserA fill:none,stroke:none
+    style Backend fill:none,stroke:none
+    style Clients fill:none,stroke:none
+    style ClientSync fill:none,stroke:none
+```
 
 ## Role-Based Access Matrix
 
-StockFlow implements strict role boundaries verified at both the API route middleware and frontend UI navigation levels:
+Enforced at both the API middleware level and the frontend navigation level:
 
 | Feature / Module | Super Admin | Warehouse Manager | Warehouse Staff |
 | :--- | :---: | :---: | :---: |
-| **System Settings & User Provisioning** | Full Access | No Access | No Access |
-| **Warehouse & Bin Creation** | Full Access | Full Access | Read Only |
-| **Product Catalog & Pricing** | Full Access | Full Access | Read Only |
-| **Stock-In Operations** | Full Access | Full Access | Full Access |
-| **Stock-Out Operations** | Full Access | Full Access | Full Access |
-| **Manual Stock Adjustments** | Full Access | Full Access | No Access |
-| **PO Creation & Supplier Management** | Full Access | Full Access | Read Only |
-| **PO Goods Intake (Receiving)** | Full Access | Full Access | Full Access |
-| **SO Creation & Approval** | Full Access | Full Access | Read Only |
-| **Order Picking, Packing & Shipping** | Full Access | Full Access | Full Access |
-| **Dashboard Analytics & Velocity Reports** | Full Access | Full Access | Summary Only |
-
----
+| System settings & user provisioning | Full | — | — |
+| Warehouse & bin creation | Full | Full | Read only |
+| Product catalog & pricing | Full | Full | Read only |
+| Stock in / stock out | Full | Full | Full |
+| Manual stock adjustments | Full | Full | — |
+| PO creation & supplier management | Full | Full | Read only |
+| PO goods intake | Full | Full | Full |
+| SO creation & approval | Full | Full | Read only |
+| Order picking, packing, shipping | Full | Full | Full |
+| Dashboard analytics | Full | Full | Summary only |
 
 ## In-Memory Caching Strategy
 
-Rather than adding external Redis infrastructure overhead for modest single-node or containerized deployments, StockFlow includes a custom, lock-striped in-memory cache (`backend/internal/middleware/cache.go`):
+Instead of adding Redis for a deployment this size, StockFlow uses a lock-striped in-memory cache (`backend/internal/middleware/cache.go`):
 
-- **Read Scalability**: Uses `sync.RWMutex` so concurrent read operations execute completely non-blocking.
-- **Targeted Auto-Invalidation**: When any mutating request (`POST`, `PUT`, `DELETE`, `PATCH`) succeeds with a `2xx` status code, the middleware automatically purges the specific cache partition associated with that resource family (`products`, `inventory`, `warehouses`, `purchase-orders`, `sales-orders`).
-- **Zero-Stale Guarantees**: Mutations immediately evict cached reads before the response completes, guaranteeing the next fetch retrieves fresh state.
-- **Transparent Bypass**: Authentication endpoints, health checks, and SSE streams (`/api/v1/events`) bypass the caching layer entirely.
-
----
+- `sync.RWMutex` backing lets concurrent reads run without blocking each other.
+- A successful mutation (`POST`/`PUT`/`DELETE`/`PATCH` returning 2xx) purges only the cache partition for that resource family (`products`, `inventory`, `warehouses`, `purchase-orders`, `sales-orders`), not the whole cache.
+- Because invalidation happens before the response completes, the next read after a write won't come back stale.
+- Auth endpoints, health checks, and the SSE stream bypass the cache entirely.
 
 ## Concurrency & Chaos Benchmarks
 
-Stress and race-condition tests were executed using the integrated chaos testing suite (`backend/cmd/chaos/main.go`):
+Run via the chaos testing suite in `backend/cmd/chaos/main.go`:
 
 | Test Scenario | Load Pattern | Recorded Outcome |
 | :--- | :--- | :--- |
-| **Read Throughput** | 2,000 concurrent HTTP GET requests | 100% success rate, 0.85 ms average latency (served via in-memory cache) |
-| **High Contention Overselling** | 50 concurrent buyers competing for exactly 5 remaining units | Exactly 5 orders confirmed, 45 requests cleanly rejected with HTTP 400. Stock balance remained exactly 0 with zero negative balances |
-| **Database Failure Resilience** | Simulated MongoDB Atlas network drop | Automatically fails over to in-memory storage engine; system operations continued without process termination |
-| **Malformed Auth Flooding** | 500 simultaneous forged JWT tokens | 100% rejected with HTTP 401 in <0.2 ms per request |
-| **Race Detector Verification** | Full test suite run via `go test -race -v ./...` | 0 data races detected across all services, brokers, and middleware |
+| Read throughput | 2,000 concurrent GET requests | 100% success, 0.85ms avg latency (served from cache) |
+| Overselling under contention | 50 concurrent buyers competing for 5 remaining units | Exactly 5 orders confirmed, 45 rejected with HTTP 400, balance never went negative |
+| Database failure | Simulated MongoDB Atlas network drop | Falls back to in-memory storage engine, no process termination |
+| Malformed auth flooding | 500 forged JWT tokens | 100% rejected with HTTP 401, <0.2ms per request |
+| Race detector | `go test -race -v ./...` | 0 data races detected |
 
-*Note: Benchmarks reflect execution on Apple Silicon (M-series); production figures may vary based on cloud host resources.*
-
----
+*Run on Apple Silicon locally — production numbers on the actual host will vary.*
 
 ## Tech Stack
 
-### Backend
-- **Go 1.24+** — Core runtime providing native concurrency and minimal memory footprint
-- **Gin Web Framework** — High-performance HTTP routing and native SSE streaming
-- **MongoDB Go Driver** — Official driver configured with replica set connection pooling
-- **golang-jwt/jwt/v5 & bcrypt** — Cryptographic authentication and salted password hashing
+**Backend** — Go 1.24+, Gin, MongoDB Go Driver (replica set connection pooling), golang-jwt/jwt/v5 with bcrypt.
 
-### Frontend
-- **Next.js 16.3** — App Router architecture with React Server Components
-- **TypeScript 5.0+** — Strict type safety across all data contracts and API models
-- **Tailwind CSS v4** — Modern utility-first styling with optimized build compilation
-- **Lucide React** — Consistent, accessible interface iconography
-
----
+**Frontend** — Next.js 16.3 (App Router, RSC), TypeScript 5.0+, Tailwind CSS v4, Lucide React.
 
 ## Developer Setup
 
 ### Prerequisites
-- **Go 1.24+** installed locally ([golang.org](https://golang.org))
-- **Node.js 20.x+** and **npm** ([nodejs.org](https://nodejs.org))
-- A running **MongoDB** instance (or set `USE_IN_MEMORY_DB=true` to run without MongoDB)
+- Go 1.24+
+- Node.js 20.x+ and npm
+- A MongoDB instance, or set `USE_IN_MEMORY_DB=true` to skip it
 
-### 1. Clone the Repository
+### 1. Clone
 ```bash
 git clone https://github.com/RPriago/stockFlow.git
 cd stockFlow
 ```
 
-### 2. Backend Configuration
+### 2. Backend
 ```bash
 cd backend
 cp .env.example .env
 ```
-
-Configure `backend/.env`:
 ```env
 PORT=8080
 MONGO_URI=your_mongodb_connection_string
@@ -292,45 +248,30 @@ JWT_SECRET=your_super_secret_jwt_key_min_32_chars
 USE_IN_MEMORY_DB=false
 CORS_ORIGIN=https://stock-flow-brown.vercel.app
 ```
-
-Run the backend:
 ```bash
 go run cmd/api/main.go
 ```
 
-### 3. Frontend Configuration
-In a separate terminal:
+### 3. Frontend
 ```bash
 cd frontend
 cp .env.local.example .env.local
 ```
-
-Configure `frontend/.env.local`:
 ```env
 NEXT_PUBLIC_API_URL=https://your-backend-domain.onrender.com/api/v1
 ```
-
-Install dependencies and start the dev server:
 ```bash
 npm install
 npm run dev
 ```
 
-### 4. Administrator Provisioning
-On first startup against a new database, StockFlow provisions an initial Super Admin account:
-- The system generates and prints the one-time temporary credentials to the server console log.
-- Sign in to the application and navigate to **Team Management** (`/users`) to create operational staff accounts or update passwords.
+### 4. First-run admin
+On first run against a fresh database, StockFlow generates a Super Admin account and prints the one-time credentials to the server console log — they're never hardcoded in the repo. Log in with those, then create real staff accounts under **Team Management** (`/users`).
 
----
+## Hosting
 
-## Production Deployment
-
-- **Web Application**: **[https://stock-flow-brown.vercel.app/](https://stock-flow-brown.vercel.app/)**
-- **Backend API**: Hosted as a containerized service on [Render](https://render.com)
-- **Database**: [MongoDB Atlas](https://www.mongodb.com/atlas) with automated backups and replica sets
-
----
+Frontend on Vercel's edge network, backend as a containerized service on Render, database on MongoDB Atlas with automated backups.
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+MIT — see [LICENSE](LICENSE).
