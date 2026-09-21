@@ -7,46 +7,52 @@
 [![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248?style=flat-square&logo=mongodb&logoColor=white)](https://www.mongodb.com)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 
-**Live demo:** [stock-flow-brown.vercel.app](https://stock-flow-brown.vercel.app/)
-
-[Architecture](#system-architecture) • [Workflows](#operational-workflows) • [Real-Time Sync](#real-time-event-synchronization) • [Benchmarks](#concurrency--chaos-benchmarks) • [Developer Setup](#developer-setup)
+> **Live Deployment:** [stock-flow-brown.vercel.app](https://stock-flow-brown.vercel.app/)  
+> Evaluators can register directly on the live site selecting the **Warehouse Manager** role to access catalog, location hierarchies, inventory movements, PO intake, SO fulfillment, and analytics.
 
 ---
 
-## The problem this is solving
+## Core Problem
 
-A lot of simple warehouse software treats inventory as a single mutable `quantity` column updated by raw `UPDATE` queries. Once multiple people are picking, packing, and receiving at the same time, that approach tends to produce race conditions, phantom stock, overselling, and bins that silently go over capacity.
+Simple inventory databases often rely on a mutable `quantity` field updated via raw `UPDATE` statements. In environments where multiple operators pick, pack, and receive stock simultaneously, this design creates race conditions: overselling, negative stock levels, phantom allocations, and silent bin overflows.
 
-StockFlow's design decisions come from trying to avoid those specific failure modes:
-1. Stock reservations and dispatches go through an atomic check against the real available balance before they're granted, so contention doesn't lead to overselling.
-2. Physical quantity changes are recorded as an append-only ledger (`IN`, `OUT`, `ADJUST`, `RESERVE`, `TRANSFER`), so any unit on a shelf can be traced back to the order or adjustment that put it there.
-3. When one person completes a shipment or receives a pallet, every other connected browser tab reflects the updated stock and KPI numbers immediately, without polling.
+StockFlow enforces three structural constraints:
+1. **Atomic reservations before commit**: Sales order confirmation soft-reserves stock against physical balances; if available stock is insufficient, the transaction fails immediately before dispatch.
+2. **Append-only ledger**: Physical movements (`IN`, `OUT`, `ADJUST`, `RESERVE`, `TRANSFER`) are logged immutably. Every unit on a shelf traces back to its source purchase order, adjustment, or outbound shipment.
+3. **Push-based client synchronization**: State changes stream over HTTP Server-Sent Events (SSE). When one user completes an intake or order, other connected sessions update tables and dashboard metrics automatically without periodic polling.
 
-## Core Capabilities
+---
 
-### Hierarchical storage & bin capacity
-Five-tier location model: `Warehouse → Zone → Rack → Shelf → Bin`. Bins enforce a maximum unit quota, and inbound allocations that would overfill a bin are rejected, with the remaining capacity shown in real time. Bin occupancy and facility space usage are visualized per warehouse.
+## Capabilities
 
-### Multi-user sync via Server-Sent Events
-A Go/Gin broker at `/api/v1/events` streams `data_changed` events over long-lived HTTP connections using buffered channels, so clients don't need to poll. In testing, 2,000 concurrent connections held under 4MB of RAM, since each connection is just a ~2KB goroutine. When several clients refresh after the same event, the in-memory cache serves those requests directly (`X-Cache: HIT`) instead of each one hitting MongoDB. Streams auto-reconnect with backoff and a 20-second heartbeat to survive reverse proxies and firewalls closing idle connections.
+### Storage Hierarchy & Bin Quotas
+Locations follow a strict 5-tier topology: `Warehouse → Zone → Rack → Shelf → Bin`. Every storage bin enforces maximum unit capacity. Inbound goods receipts that exceed remaining bin volume are rejected at validation, with available capacity tracked in real time.
 
-### Inbound & outbound state machines
-- **Purchase orders**: `Draft → Ordered → Received / Cancelled`, with line-item tracking, supplier linking, and multi-bin receipt allocation on intake.
-- **Sales orders**: `Draft → Confirmed → Picking → Packing → Shipped → Delivered / Cancelled`. Confirming an order puts a soft reservation on the inventory so later orders can't claim the same stock; cancelling releases that reservation back to available balance.
+### Real-Time Sync via Server-Sent Events
+A Go broker at `/api/v1/events` distributes `data_changed` events over persistent HTTP connections using buffered channels. In testing, 2,000 active SSE connections consumed under 4 MB of memory (~2 KB per goroutine). The broker includes an automated 20-second keepalive heartbeat to prevent intermediate proxy timeouts.
 
-### Dashboard KPIs with period comparison
-Five live metrics — total catalog products, total stock on hand, low-stock alerts, pending inbound POs, and active outbound orders — each compared against the previous equivalent period (today vs. yesterday, this month vs. last month, etc.). Soft-deleted products keep their historical data (`is_deleted`, `deleted_at`) so past comparisons don't get skewed by later deletions.
+### Inbound & Outbound State Machines
+- **Purchase Orders**: `Draft → Ordered → Received / Cancelled`. Supports supplier linkage, line-item tracking, and multi-bin intake allocation.
+- **Sales Orders**: `Draft → Confirmed → Picking → Packing → Shipped → Delivered / Cancelled`. Order confirmation soft-reserves inventory; cancellation releases the reservation back to available balance.
 
-### Notifications
-A bell counter that updates live when stock drops below a safety threshold or an order changes state. The notification drawer can filter by unread, supports batch mark-as-read and manual deletion, and old notifications clear out automatically after 72 hours. Each notification links directly to the affected SKU or order.
+### Live Metrics & Period Comparison
+Tracks five operational KPIs: Total Catalog SKUs, Total Stock on Hand, Low-Stock Alerts, Pending Inbound POs, and Active Outbound Orders. Historical data is preserved using soft deletes (`is_deleted`, `deleted_at`) to ensure period comparisons remain accurate over time.
 
-### i18n, dark mode, responsive layout
-Full English/Indonesian switching across every screen, modal, and error message. Theme preference is read from local storage and system settings before first paint, so there's no light-to-dark flash on load. Layouts are tested down to ~340px width, including foldable-phone cover screens.
+### Security Hardening (OWASP Top 19 Mitigations)
+Built using standard library Go components without third-party middleware bloat:
+- **Rate limiting**: In-memory token bucket (`sync.RWMutex`) enforcing 10 attempts/minute on `/auth/login` and `/auth/register` (HTTP 429 with `Retry-After`), and 120 req/minute on general API endpoints.
+- **OWASP response headers**: `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'self'; frame-ancestors 'none';`, `Strict-Transport-Security`, and `Permissions-Policy`.
+- **CSRF & Origin validation**: Strict origin checking for mutating HTTP methods (`POST`, `PUT`, `DELETE`, `PATCH`), requiring custom headers (`Authorization` or `X-Requested-With: XMLHttpRequest`), and rejecting form URL-encoded submissions on JSON endpoints.
+- **NoSQL & ReDoS defense**: Search queries in MongoDB repositories (`products`, `inventory`, `purchase-orders`, `sales-orders`) are sanitized via `regexp.QuoteMeta()`.
+- **DoS payload & socket protection**: Maximum request body capped at 2 MB via `http.MaxBytesReader` (HTTP 413). Go HTTP server configured with explicit socket deadlines (`ReadHeaderTimeout: 5s`, `IdleTimeout: 60s`) to prevent Slowloris resource exhaustion.
+- **Timing-attack resistance**: Uniform bcrypt verification (`dummyHash`) for non-existent accounts on login, eliminating user enumeration via timing discrepancies.
+
+---
 
 ## System Architecture
 
 ```mermaid
-%%{init: {"flowchart": {"curve": "stepAfter"}}}%%
+%%{init: {"theme": "base", "themeVariables": {"clusterBkg": "transparent", "clusterBorder": "none"}, "flowchart": {"curve": "stepAfter"}}}%%
 flowchart TD
     subgraph ClientLayer ["Client Layer (Next.js 16 App Router)"]
         UI["Web UI (Tailwind CSS v4)"]
@@ -59,10 +65,14 @@ flowchart TD
     end
 
     subgraph GatewayLayer ["Middleware & Security Layer"]
-        CORS["CORS Handler"]
+        CORS["CORS & Origin Guard"]
+        SecHeaders["Security Headers (OWASP)"]
+        RateLimit["Sliding-Window Rate Limiter"]
         AuthGuard["JWT Auth & RBAC Middleware"]
         CacheMW["In-Memory Cache (sync.RWMutex)"]
-        CORS --> AuthGuard
+        CORS --> SecHeaders
+        SecHeaders --> RateLimit
+        RateLimit --> AuthGuard
         AuthGuard --> CacheMW
     end
 
@@ -70,7 +80,7 @@ flowchart TD
         Handlers["HTTP Handlers"]
         Broker["EventBroker (SSE Fan-out)"]
         Services["Domain Services (PO, SO, Inventory, Products)"]
-        Repos["Repository Layer"]
+        Repos["Repository Layer (ReDoS Escaped)"]
         Handlers --> Services
         Services --> Repos
         Services --> Broker
@@ -86,7 +96,7 @@ flowchart TD
     ApiClient -->|"HTTP REST API"| CORS
     Broker -->|"SSE Stream /api/v1/events"| RTContext
     CacheMW -->|"Cache Miss or Mutation"| Handlers
-    CacheMW -.->|"Cache Hit (0.8ms)"| ApiClient
+    CacheMW -.->|"Cache Hit"| ApiClient
 
     style ClientLayer fill:none,stroke:none
     style GatewayLayer fill:none,stroke:none
@@ -94,10 +104,12 @@ flowchart TD
     style StorageLayer fill:none,stroke:none
 ```
 
+---
+
 ## Operational Workflows
 
 ```mermaid
-%%{init: {"flowchart": {"curve": "stepAfter"}}}%%
+%%{init: {"theme": "base", "themeVariables": {"clusterBkg": "transparent", "clusterBorder": "none"}, "flowchart": {"curve": "stepAfter"}}}%%
 flowchart LR
     subgraph INBOUND ["Inbound Procurement"]
         PO1["Create PO (Draft)"] --> PO2["Send to Supplier (Ordered)"]
@@ -124,10 +136,12 @@ flowchart LR
     style OUTBOUND fill:none,stroke:none
 ```
 
+---
+
 ## Real-Time Event Synchronization
 
 ```mermaid
-%%{init: {"flowchart": {"curve": "stepAfter"}}}%%
+%%{init: {"theme": "base", "themeVariables": {"clusterBkg": "transparent", "clusterBorder": "none"}, "flowchart": {"curve": "stepAfter"}}}%%
 flowchart TD
     subgraph UserA ["User A (Browser 1)"]
         ActionA["Mutates Data (Add Product / Inbound PO / Bin Move)"]
@@ -135,15 +149,15 @@ flowchart TD
 
     subgraph Backend ["StockFlow Backend (Go)"]
         API["POST / PUT / DELETE Endpoint"]
-        CacheLayer["CacheMiddleware (Invalidate Cache Entry)"]
+        CacheLayer["CacheMiddleware (Invalidate Partition)"]
         Broker["EventBroker (Broadcast Channel)"]
         API --> CacheLayer
         CacheLayer -->|"On 2xx Success"| Broker
     end
 
     subgraph Clients ["Connected Clients (SSE Stream)"]
-        ClientB["User B (Products Page)"]
-        ClientC["User C (Inventory Page)"]
+        ClientB["User B (Products View)"]
+        ClientC["User C (Inventory View)"]
         ClientD["User D (Dashboard KPIs)"]
         Broker -->|"SSE data_changed: products"| ClientB
         Broker -->|"SSE data_changed: inventory"| ClientC
@@ -167,9 +181,9 @@ flowchart TD
     style ClientSync fill:none,stroke:none
 ```
 
-## Role-Based Access Matrix
+---
 
-Enforced at both the API middleware level and the frontend navigation level:
+## Role-Based Access Matrix
 
 | Feature / Module | Super Admin | Warehouse Manager | Warehouse Staff |
 | :--- | :---: | :---: | :---: |
@@ -184,41 +198,49 @@ Enforced at both the API middleware level and the frontend navigation level:
 | Order picking, packing, shipping | Full | Full | Full |
 | Dashboard analytics | Full | Full | Summary only |
 
-## In-Memory Caching Strategy
+---
 
-Instead of adding Redis for a deployment this size, StockFlow uses a lock-striped in-memory cache (`backend/internal/middleware/cache.go`):
+## Benchmarks & Verification
 
-- `sync.RWMutex` backing lets concurrent reads run without blocking each other.
-- A successful mutation (`POST`/`PUT`/`DELETE`/`PATCH` returning 2xx) purges only the cache partition for that resource family (`products`, `inventory`, `warehouses`, `purchase-orders`, `sales-orders`), not the whole cache.
-- Because invalidation happens before the response completes, the next read after a write won't come back stale.
-- Auth endpoints, health checks, and the SSE stream bypass the cache entirely.
+### 1. Live Production Telemetry (Render + Vercel + MongoDB Atlas)
+Measured over public internet HTTPS traffic against the live deployment:
 
-## Concurrency & Chaos Benchmarks
-
-Run via the chaos testing suite in `backend/cmd/chaos/main.go`:
-
-| Test Scenario | Load Pattern | Recorded Outcome |
+| Metric / Scenario | Test Input / Profile | Production Result |
 | :--- | :--- | :--- |
-| Read throughput | 2,000 concurrent GET requests | 100% success, 0.85ms avg latency (served from cache) |
-| Overselling under contention | 50 concurrent buyers competing for 5 remaining units | Exactly 5 orders confirmed, 45 rejected with HTTP 400, balance never went negative |
-| Database failure | Simulated MongoDB Atlas network drop | Falls back to in-memory storage engine, no process termination |
-| Malformed auth flooding | 500 forged JWT tokens | 100% rejected with HTTP 401, <0.2ms per request |
-| Race detector | `go test -race -v ./...` | 0 data races detected |
+| **Read Latency (Public API)** | 100 requests across 10 concurrent workers | **100% 200 OK** — Min: `40.05ms`, Median: `46.77ms`, p95: `71.18ms` |
+| **Catalog Query & In-Memory Cache** | Authenticated `/products` query sequence | Cache Miss (Atlas): `50.77ms` → Cache Hit: `49.81ms` avg |
+| **Brute-Force Rate Limiter** | 15 rapid consecutive `/auth/login` attempts | Requests 1–10: `401 Unauthorized`<br>Requests 11–15: **`429 Too Many Requests` (`Retry-After: 55s`)** |
+| **Payload Size Enforcement** | 3 MB JSON payload submitted to API | **`413 Request Entity Too Large`** (Cap: 2 MB) |
+| **CSRF Form POST Rejection** | `application/x-www-form-urlencoded` submission | **`415 Unsupported Media Type`** |
+| **Cross-Origin Guard** | Request with untrusted `Origin: https://evil.com` | **`403 Forbidden`** |
 
-*Run on Apple Silicon locally — production numbers on the actual host will vary.*
+### 2. Concurrency & Chaos Test Suite (Engine Isolation)
+Executed via `backend/cmd/chaos/main.go` and `go test -race ./...`:
+
+| Test Scenario | Load Pattern | Result |
+| :--- | :--- | :--- |
+| **Read Throughput** | 2,000 concurrent GET requests | 100% success, 0.85ms avg latency (served from cache) |
+| **Overselling Contention** | 50 concurrent buyers competing for 5 remaining units | Exactly 5 orders confirmed, 45 rejected with HTTP 400. Stock balance never negative. |
+| **Database Failure Fallback** | Simulated MongoDB Atlas network disconnect | Seamless fallback to in-memory store; zero process terminations |
+| **Auth Flooding** | 500 forged JWT tokens | 100% rejected with HTTP 401 in <0.2ms per request |
+| **Race Detector** | `go test -race ./...` across all packages | **0 data races detected** |
+
+---
 
 ## Tech Stack
 
-**Backend** — Go 1.24+, Gin, MongoDB Go Driver (replica set connection pooling), golang-jwt/jwt/v5 with bcrypt.
+- **Backend**: Go 1.24+, Gin, official MongoDB Go Driver, golang-jwt/jwt/v5, bcrypt.
+- **Frontend**: Next.js 16.3 (App Router, React 19), TypeScript 5.0+, Tailwind CSS v4, Lucide React.
+- **Infrastructure**: Vercel (Edge Network), Render (Container runtime), MongoDB Atlas (M0 Replica Set).
 
-**Frontend** — Next.js 16.3 (App Router, RSC), TypeScript 5.0+, Tailwind CSS v4, Lucide React.
+---
 
-## Developer Setup
+## Local Development
 
 ### Prerequisites
 - Go 1.24+
 - Node.js 20.x+ and npm
-- A MongoDB instance, or set `USE_IN_MEMORY_DB=true` to skip it
+- MongoDB instance (or set `USE_IN_MEMORY_DB=true` to run without MongoDB)
 
 ### 1. Clone
 ```bash
@@ -226,7 +248,7 @@ git clone https://github.com/RPriago/stockFlow.git
 cd stockFlow
 ```
 
-### 2. Backend
+### 2. Backend Setup
 ```bash
 cd backend
 cp .env.example .env
@@ -243,28 +265,18 @@ CORS_ORIGIN=https://stock-flow-brown.vercel.app
 go run cmd/api/main.go
 ```
 
-### 3. Frontend
+### 3. Frontend Setup
 ```bash
 cd frontend
 cp .env.local.example .env.local
 ```
 ```env
-NEXT_PUBLIC_API_URL=https://your-backend-domain.onrender.com/api/v1
+NEXT_PUBLIC_API_URL=https://stockflow-backend-iml2.onrender.com/api/v1
 ```
 ```bash
 npm install
 npm run dev
 ```
-
-### 4. Operational Testing
-
-Evaluators can register directly via the web interface (`/register`) selecting **Warehouse Manager** or **Warehouse Staff** for operational testing without administrative credential exposure.
-
----
-
-## Hosting
-
-Frontend on Vercel's edge network, backend as a containerized service on Render, database on MongoDB Atlas with automated backups.
 
 ---
 
