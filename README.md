@@ -59,7 +59,7 @@ Built using standard library Go components without third-party middleware bloat:
 ## System Architecture
 
 ```mermaid
-%%{init: {"theme": "base", "themeVariables": {"primaryColor": "#ffffff", "primaryBorderColor": "#333333", "primaryTextColor": "#1a1a1a", "lineColor": "#333333", "secondaryColor": "#ffffff", "tertiaryColor": "#ffffff", "clusterBkg": "transparent", "clusterBorder": "#666666"}, "flowchart": {"curve": "stepAfter"}}}%%
+%%{init: {"theme": "base", "themeVariables": {"primaryColor": "transparent", "primaryBorderColor": "#8a8a8a", "primaryTextColor": "#e6e6e6", "lineColor": "#8a8a8a", "secondaryColor": "transparent", "tertiaryColor": "transparent", "clusterBkg": "transparent", "clusterBorder": "none"}, "flowchart": {"curve": "stepAfter"}}}%%
 flowchart TD
     subgraph ClientLayer ["Client Layer (Next.js 16 App Router)"]
         UI["Web UI (Tailwind CSS v4)"]
@@ -116,7 +116,7 @@ flowchart TD
 ## Operational Workflows
 
 ```mermaid
-%%{init: {"theme": "base", "themeVariables": {"primaryColor": "#ffffff", "primaryBorderColor": "#333333", "primaryTextColor": "#1a1a1a", "lineColor": "#333333", "secondaryColor": "#ffffff", "tertiaryColor": "#ffffff", "clusterBkg": "transparent", "clusterBorder": "#666666"}, "flowchart": {"curve": "stepAfter"}}}%%
+%%{init: {"theme": "base", "themeVariables": {"primaryColor": "transparent", "primaryBorderColor": "#8a8a8a", "primaryTextColor": "#e6e6e6", "lineColor": "#8a8a8a", "secondaryColor": "transparent", "tertiaryColor": "transparent", "clusterBkg": "transparent", "clusterBorder": "none"}, "flowchart": {"curve": "stepAfter"}}}%%
 flowchart LR
     subgraph INBOUND ["Inbound Procurement"]
         PO1["Create PO (Draft)"] --> PO2["Send to Supplier (Ordered)"]
@@ -148,7 +148,7 @@ flowchart LR
 ## Real-Time Event Synchronization
 
 ```mermaid
-%%{init: {"theme": "base", "themeVariables": {"primaryColor": "#ffffff", "primaryBorderColor": "#333333", "primaryTextColor": "#1a1a1a", "lineColor": "#333333", "secondaryColor": "#ffffff", "tertiaryColor": "#ffffff", "clusterBkg": "transparent", "clusterBorder": "#666666"}, "flowchart": {"curve": "stepAfter"}}}%%
+%%{init: {"theme": "base", "themeVariables": {"primaryColor": "transparent", "primaryBorderColor": "#8a8a8a", "primaryTextColor": "#e6e6e6", "lineColor": "#8a8a8a", "secondaryColor": "transparent", "tertiaryColor": "transparent", "clusterBkg": "transparent", "clusterBorder": "none"}, "flowchart": {"curve": "stepAfter"}}}%%
 flowchart TD
     subgraph UserA ["User A (Browser 1)"]
         ActionA["Mutates Data (Add Product / Inbound PO / Bin Move)"]
