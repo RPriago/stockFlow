@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"regexp"
 	"time"
 
 	"stockflow-backend/internal/models"
@@ -215,11 +216,12 @@ func (r *mongoSORepository) ListSOs(ctx context.Context, params models.SOQueryPa
 		}
 	}
 	if params.Search != "" {
+		safeSearch := regexp.QuoteMeta(params.Search)
 		filter["$or"] = []bson.M{
-			{"order_number": bson.M{"$regex": params.Search, "$options": "i"}},
-			{"customer_name": bson.M{"$regex": params.Search, "$options": "i"}},
-			{"tracking_number": bson.M{"$regex": params.Search, "$options": "i"}},
-			{"notes": bson.M{"$regex": params.Search, "$options": "i"}},
+			{"order_number": bson.M{"$regex": safeSearch, "$options": "i"}},
+			{"customer_name": bson.M{"$regex": safeSearch, "$options": "i"}},
+			{"tracking_number": bson.M{"$regex": safeSearch, "$options": "i"}},
+			{"notes": bson.M{"$regex": safeSearch, "$options": "i"}},
 		}
 	}
 

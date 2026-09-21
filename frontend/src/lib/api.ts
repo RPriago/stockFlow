@@ -22,6 +22,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   const defaultHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
+    'X-Requested-With': 'XMLHttpRequest',
   };
 
   // Attach Bearer token fallback for seamless cross-domain deployments (e.g. Vercel -> Render)

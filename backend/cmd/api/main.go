@@ -107,8 +107,20 @@ func main() {
 	soHandler := handler.NewSOHandler(soService)
 	notifHandler := handler.NewNotificationHandler(notifService)
 
+	// 4. Initialize Rate Limiters
+	authLimiter := middleware.NewRateLimiter(10, time.Minute)
+	defer authLimiter.Close()
+	apiLimiter := middleware.NewRateLimiter(120, time.Minute)
+	defer apiLimiter.Close()
+
 	// 5. Setup Gin Router
 	router := gin.Default()
+
+	// Security response headers (OWASP best practices: XSS, Clickjacking, MIME-sniffing, HSTS)
+	router.Use(middleware.SecurityHeadersMiddleware())
+
+	// Request body size limit (2 MB max to defend against DoS payload exhaustion)
+	router.Use(middleware.BodyLimitMiddleware(2 << 20))
 
 	// CORS
 	router.Use(middleware.CORSMiddleware(cfg))
@@ -122,8 +134,10 @@ func main() {
 		})
 	})
 
-	// API v1 routes (with 15s in-memory caching to safeguard Atlas free tier)
+	// API v1 routes (protected by general API rate limiting, CSRF verification, and 15s cache)
 	v1 := router.Group("/api/v1")
+	v1.Use(apiLimiter.Middleware())
+	v1.Use(middleware.CSRFProtectionMiddleware(cfg))
 	v1.Use(middleware.CacheMiddleware(15 * time.Second))
 	{
 		// Real-time events SSE stream (Protected by AuthMiddleware)
@@ -131,11 +145,11 @@ func main() {
 			events.GetBroker().ServeHTTP(c)
 		})
 
-		// Auth routes
+		// Auth routes (protected by dedicated AuthRateLimiter against brute force & credential stuffing)
 		authGroup := v1.Group("/auth")
 		{
-			authGroup.POST("/login", authHandler.Login)
-			authGroup.POST("/register", authHandler.PublicRegister)
+			authGroup.POST("/login", authLimiter.Middleware(), authHandler.Login)
+			authGroup.POST("/register", authLimiter.Middleware(), authHandler.PublicRegister)
 			authGroup.POST("/logout", authHandler.Logout)
 
 			// Protected auth routes
@@ -292,10 +306,15 @@ func main() {
 		}
 	}
 
-	// 6. Start HTTP server with graceful shutdown
+	// 6. Start HTTP server with graceful shutdown and Slowloris timeout protection
 	srv := &http.Server{
-		Addr:    ":" + cfg.Port,
-		Handler: router,
+		Addr:              ":" + cfg.Port,
+		Handler:           router,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1 MB
 	}
 
 	go func() {

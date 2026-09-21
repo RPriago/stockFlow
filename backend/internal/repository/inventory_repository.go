@@ -3,13 +3,15 @@ package repository
 import (
 	"context"
 	"errors"
+	"regexp"
 	"time"
+
+	"stockflow-backend/internal/models"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"stockflow-backend/internal/models"
 )
 
 var (
@@ -20,8 +22,8 @@ var (
 )
 
 type InventoryRepository interface {
-	StockIn(ctx context.Context, item *models.InventoryItem, qty int) (*models.InventoryItem, int, error) // returns (updatedItem, balanceBefore, err)
-	StockOut(ctx context.Context, warehouseID, locationID, productID primitive.ObjectID, variantID string, qty int) (*models.InventoryItem, int, error) // returns (updatedItem, balanceBefore, err)
+	StockIn(ctx context.Context, item *models.InventoryItem, qty int) (*models.InventoryItem, int, error)                                                        // returns (updatedItem, balanceBefore, err)
+	StockOut(ctx context.Context, warehouseID, locationID, productID primitive.ObjectID, variantID string, qty int) (*models.InventoryItem, int, error)          // returns (updatedItem, balanceBefore, err)
 	AdjustStock(ctx context.Context, warehouseID, locationID, productID primitive.ObjectID, variantID string, actualQty int) (*models.InventoryItem, int, error) // returns (updatedItem, balanceBefore, err)
 	ReserveStock(ctx context.Context, warehouseID, locationID, productID primitive.ObjectID, variantID string, qty int) (*models.InventoryItem, error)
 	ReleaseStock(ctx context.Context, warehouseID, locationID, productID primitive.ObjectID, variantID string, qty int) (*models.InventoryItem, error)
@@ -30,7 +32,7 @@ type InventoryRepository interface {
 	FindItem(ctx context.Context, warehouseID, locationID, productID primitive.ObjectID, variantID string) (*models.InventoryItem, error)
 	FindItemByID(ctx context.Context, id primitive.ObjectID) (*models.InventoryItem, error)
 	FindItems(ctx context.Context, params models.InventoryQueryParam) ([]models.InventoryItem, int64, error)
-	
+
 	RecordMovement(ctx context.Context, movement *models.InventoryMovement) error
 	FindMovements(ctx context.Context, params models.MovementQueryParam) ([]models.InventoryMovement, int64, error)
 	GetStats(ctx context.Context) (*models.InventoryStatsResponse, error)
@@ -346,10 +348,11 @@ func (r *mongoInventoryRepository) FindItems(ctx context.Context, params models.
 		}
 	}
 	if params.Search != "" {
+		safeSearch := regexp.QuoteMeta(params.Search)
 		filter["$or"] = []bson.M{
-			{"product_name": bson.M{"$regex": params.Search, "$options": "i"}},
-			{"sku": bson.M{"$regex": params.Search, "$options": "i"}},
-			{"location_code": bson.M{"$regex": params.Search, "$options": "i"}},
+			{"product_name": bson.M{"$regex": safeSearch, "$options": "i"}},
+			{"sku": bson.M{"$regex": safeSearch, "$options": "i"}},
+			{"location_code": bson.M{"$regex": safeSearch, "$options": "i"}},
 		}
 	}
 	if params.LowStockOnly {

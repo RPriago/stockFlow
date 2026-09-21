@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"regexp"
 	"time"
 
 	"stockflow-backend/internal/models"
@@ -97,10 +98,11 @@ func (r *mongoProductRepository) FindProducts(ctx context.Context, params models
 	}
 
 	if params.Search != "" {
+		safeSearch := regexp.QuoteMeta(params.Search)
 		filter["$or"] = []bson.M{
-			{"name": bson.M{"$regex": params.Search, "$options": "i"}},
-			{"sku": bson.M{"$regex": params.Search, "$options": "i"}},
-			{"barcode": bson.M{"$regex": params.Search, "$options": "i"}},
+			{"name": bson.M{"$regex": safeSearch, "$options": "i"}},
+			{"sku": bson.M{"$regex": safeSearch, "$options": "i"}},
+			{"barcode": bson.M{"$regex": safeSearch, "$options": "i"}},
 		}
 	}
 

@@ -14,11 +14,11 @@ func CORSMiddleware(cfg *config.Config) gin.HandlerFunc {
 	corsConfig := cors.Config{
 		AllowOriginFunc: func(origin string) bool {
 			// Allow exact FRONTEND_URL or local development
-			if origin == cfg.FrontendURL || origin == "http://localhost:3000" || origin == "http://127.0.0.1:3000" {
+			if origin == cfg.FrontendURL || origin == "http://localhost:3000" || origin == "http://127.0.0.1:3000" || origin == "https://stock-flow-brown.vercel.app" {
 				return true
 			}
-			// Allow all Vercel deployments (production & preview branches: *.vercel.app)
-			if strings.HasSuffix(origin, ".vercel.app") {
+			// Allow dedicated preview deployments for this project (stock-flow-*.vercel.app)
+			if strings.HasPrefix(origin, "https://stock-flow-") && strings.HasSuffix(origin, ".vercel.app") {
 				return true
 			}
 			return false

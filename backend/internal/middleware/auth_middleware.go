@@ -36,8 +36,8 @@ func AuthMiddleware(cfg *config.Config) gin.HandlerFunc {
 			}
 		}
 
-		// 3. Fallback to query param (for EventSource SSE streaming)
-		if tokenString == "" {
+		// 3. Fallback to query param (strictly restricted to EventSource SSE streaming at /events to prevent token log leakage)
+		if tokenString == "" && strings.HasSuffix(c.Request.URL.Path, "/events") {
 			tokenString = c.Query("token")
 		}
 

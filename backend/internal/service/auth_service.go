@@ -17,6 +17,10 @@ var (
 	ErrInvalidCredentials = errors.New("invalid email or password")
 	ErrAccountInactive    = errors.New("user account is inactive")
 	ErrInvalidRole        = errors.New("invalid user role")
+
+	// Pre-hashed dummy bcrypt string used to equalize timing for non-existent users,
+	// preventing user enumeration attacks.
+	dummyHash = "$2a$10$7EqJtq98hPqEX7fNZaFWoO0vQpLdJ0y3/VqG18c1GqK1Vd0iN7KkG"
 )
 
 type AuthService interface {
@@ -46,6 +50,9 @@ func (s *authService) Login(ctx context.Context, req models.LoginRequest) (*mode
 	user, err := s.userRepo.FindByEmail(ctx, req.Email)
 	if err != nil {
 		if errors.Is(err, repository.ErrUserNotFound) {
+			// Defend against timing attacks / user enumeration: perform constant-time
+			// bcrypt comparison so response time does not leak account existence.
+			utils.CheckPasswordHash(req.Password, dummyHash)
 			return nil, "", time.Time{}, ErrInvalidCredentials
 		}
 		return nil, "", time.Time{}, err
@@ -206,8 +213,8 @@ func (s *authService) UpdateUser(ctx context.Context, currentUserID, targetUserI
 	}
 
 	if req.Password != "" {
-		if len(req.Password) < 6 {
-			return nil, errors.New("password must be at least 6 characters")
+		if len(req.Password) < 8 {
+			return nil, errors.New("password must be at least 8 characters")
 		}
 		hash, err := utils.HashPassword(req.Password)
 		if err != nil {

@@ -3,13 +3,15 @@ package repository
 import (
 	"context"
 	"errors"
+	"regexp"
 	"time"
+
+	"stockflow-backend/internal/models"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"stockflow-backend/internal/models"
 )
 
 var (
@@ -216,10 +218,11 @@ func (r *mongoPORepository) ListPOs(ctx context.Context, params models.POQueryPa
 		}
 	}
 	if params.Search != "" {
+		safeSearch := regexp.QuoteMeta(params.Search)
 		filter["$or"] = []bson.M{
-			{"order_number": bson.M{"$regex": params.Search, "$options": "i"}},
-			{"supplier_name": bson.M{"$regex": params.Search, "$options": "i"}},
-			{"notes": bson.M{"$regex": params.Search, "$options": "i"}},
+			{"order_number": bson.M{"$regex": safeSearch, "$options": "i"}},
+			{"supplier_name": bson.M{"$regex": safeSearch, "$options": "i"}},
+			{"notes": bson.M{"$regex": safeSearch, "$options": "i"}},
 		}
 	}
 

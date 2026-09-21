@@ -54,7 +54,7 @@ type UpdateUserRequest struct {
 	Role        Role   `json:"role" binding:"required"`
 	WarehouseID string `json:"warehouse_id,omitempty"`
 	IsActive    *bool  `json:"is_active,omitempty"`
-	Password    string `json:"password,omitempty"`
+	Password    string `json:"password,omitempty" binding:"omitempty,min=8"`
 }
 
 type UserResponse struct {

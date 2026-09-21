@@ -489,7 +489,7 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
                         key={notif.id}
                         onClick={() => {
                           handleMarkAsRead(notif);
-                          if (notif.link) {
+                          if (notif.link && notif.link.startsWith('/') && !notif.link.startsWith('//')) {
                             router.push(notif.link);
                             setShowNotifPopover(false);
                           }
