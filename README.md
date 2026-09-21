@@ -32,7 +32,7 @@ Locations follow a strict 5-tier topology: `Warehouse → Zone → Rack → Shel
 
 ### Real-Time Sync via Server-Sent Events
 
-A Go broker at `/api/v1/events` distributes `data_changed` events over persistent HTTP connections using buffered channels. In testing, 2,000 active SSE connections consumed under 4 MB of memory (~2 KB per goroutine). The broker includes an automated 20-second keepalive heartbeat to prevent intermediate proxy timeouts.
+A Go broker at `/api/v1/events` distributes `data_changed` events over persistent HTTP connections using buffered channels. In testing, 2,000 active SSE connections held under 4 MB of memory (~2 KB per goroutine). The broker sends a 20-second keepalive heartbeat so intermediate proxies don't time the connection out.
 
 ### Inbound & Outbound State Machines
 
@@ -41,7 +41,7 @@ A Go broker at `/api/v1/events` distributes `data_changed` events over persisten
 
 ### Live Metrics & Period Comparison
 
-Tracks five operational KPIs: Total Catalog SKUs, Total Stock on Hand, Low-Stock Alerts, Pending Inbound POs, and Active Outbound Orders. Historical data is preserved using soft deletes (`is_deleted`, `deleted_at`) to ensure period comparisons remain accurate over time.
+Tracks five operational KPIs: Total Catalog SKUs, Total Stock on Hand, Low-Stock Alerts, Pending Inbound POs, and Active Outbound Orders. Soft deletes (`is_deleted`, `deleted_at`) preserve historical data, so period comparisons stay accurate over time.
 
 ### Security Hardening (OWASP Top 19 Mitigations)
 
@@ -52,14 +52,14 @@ Built using standard library Go components without third-party middleware bloat:
 - **CSRF & Origin validation**: Strict origin checking for mutating HTTP methods (`POST`, `PUT`, `DELETE`, `PATCH`), requiring custom headers (`Authorization` or `X-Requested-With: XMLHttpRequest`), and rejecting form URL-encoded submissions on JSON endpoints.
 - **NoSQL & ReDoS defense**: Search queries in MongoDB repositories (`products`, `inventory`, `purchase-orders`, `sales-orders`) are sanitized via `regexp.QuoteMeta()`.
 - **DoS payload & socket protection**: Maximum request body capped at 2 MB via `http.MaxBytesReader` (HTTP 413). Go HTTP server configured with explicit socket deadlines (`ReadHeaderTimeout: 5s`, `IdleTimeout: 60s`) to prevent Slowloris resource exhaustion.
-- **Timing-attack resistance**: Uniform bcrypt verification (`dummyHash`) for non-existent accounts on login, eliminating user enumeration via timing discrepancies.
+- **Timing-attack resistance**: Login runs bcrypt verification against a `dummyHash` for non-existent accounts, so response timing can't reveal whether an account exists.
 
 ---
 
 ## System Architecture
 
 ```mermaid
-%%{init: {"theme": "base", "themeVariables": {"clusterBkg": "transparent", "clusterBorder": "none"}, "flowchart": {"curve": "stepAfter"}}}%%
+%%{init: {"theme": "base", "themeVariables": {"primaryColor": "#ffffff", "primaryBorderColor": "#333333", "primaryTextColor": "#1a1a1a", "lineColor": "#333333", "secondaryColor": "#ffffff", "tertiaryColor": "#ffffff", "clusterBkg": "transparent", "clusterBorder": "#666666"}, "flowchart": {"curve": "stepAfter"}}}%%
 flowchart TD
     subgraph ClientLayer ["Client Layer (Next.js 16 App Router)"]
         UI["Web UI (Tailwind CSS v4)"]
@@ -116,7 +116,7 @@ flowchart TD
 ## Operational Workflows
 
 ```mermaid
-%%{init: {"theme": "base", "themeVariables": {"clusterBkg": "transparent", "clusterBorder": "none"}, "flowchart": {"curve": "stepAfter"}}}%%
+%%{init: {"theme": "base", "themeVariables": {"primaryColor": "#ffffff", "primaryBorderColor": "#333333", "primaryTextColor": "#1a1a1a", "lineColor": "#333333", "secondaryColor": "#ffffff", "tertiaryColor": "#ffffff", "clusterBkg": "transparent", "clusterBorder": "#666666"}, "flowchart": {"curve": "stepAfter"}}}%%
 flowchart LR
     subgraph INBOUND ["Inbound Procurement"]
         PO1["Create PO (Draft)"] --> PO2["Send to Supplier (Ordered)"]
@@ -148,7 +148,7 @@ flowchart LR
 ## Real-Time Event Synchronization
 
 ```mermaid
-%%{init: {"theme": "base", "themeVariables": {"clusterBkg": "transparent", "clusterBorder": "none"}, "flowchart": {"curve": "stepAfter"}}}%%
+%%{init: {"theme": "base", "themeVariables": {"primaryColor": "#ffffff", "primaryBorderColor": "#333333", "primaryTextColor": "#1a1a1a", "lineColor": "#333333", "secondaryColor": "#ffffff", "tertiaryColor": "#ffffff", "clusterBkg": "transparent", "clusterBorder": "#666666"}, "flowchart": {"curve": "stepAfter"}}}%%
 flowchart TD
     subgraph UserA ["User A (Browser 1)"]
         ActionA["Mutates Data (Add Product / Inbound PO / Bin Move)"]
@@ -230,7 +230,7 @@ Executed via `backend/cmd/chaos/main.go` and `go test -race ./...`:
 | :---------------------------- | :--------------------------------------------------- | :----------------------------------------------------------------------------------- |
 | **Read Throughput**           | 2,000 concurrent GET requests                        | 100% success, 0.85ms avg latency (served from cache)                                 |
 | **Overselling Contention**    | 50 concurrent buyers competing for 5 remaining units | Exactly 5 orders confirmed, 45 rejected with HTTP 400. Stock balance never negative. |
-| **Database Failure Fallback** | Simulated MongoDB Atlas network disconnect           | Seamless fallback to in-memory store; zero process terminations                      |
+| **Database Failure Fallback** | Simulated MongoDB Atlas network disconnect           | Falls back to the in-memory store with no dropped requests; zero process terminations |
 | **Auth Flooding**             | 500 forged JWT tokens                                | 100% rejected with HTTP 401 in <0.2ms per request                                    |
 | **Race Detector**             | `go test -race ./...` across all packages            | **0 data races detected**                                                            |
 
