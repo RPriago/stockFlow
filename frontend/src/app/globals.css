@@ -4,41 +4,50 @@
 
 @theme {
   --color-page: #FFFFFF;
-  --color-primary-accent: #7C6EF0;
-  --color-secondary-accent: #C7BFFA;
-  --color-text-main: #1B1B1F;
-  --color-text-muted: #8B8B99;
-  --color-line: #EEEDF5;
-  --color-badge-green-bg: #E4F7EC;
-  --color-badge-green-text: #1FAA59;
-  --color-badge-red-bg: #FBE8EA;
-  --color-badge-red-text: #E0475C;
+  --color-primary-accent: #0B3333;
+  --color-secondary-accent: #134E4A;
+  --color-text-main: #0F172A;
+  --color-text-muted: #64748B;
+  --color-line: #E2E8F0;
+  --color-badge-green-bg: #ECFDF5;
+  --color-badge-green-text: #059669;
+  --color-badge-red-bg: #FEF2F2;
+  --color-badge-red-text: #DC2626;
 
-  --color-indigo-600: #7C6EF0;
-  --color-indigo-700: #6C5CE7;
-  --color-indigo-500: #7C6EF0;
-  --color-indigo-400: #9D93F5;
-  --color-indigo-100: #F4F3FF;
-  --color-indigo-50: #FAF9FF;
+  /* Theme mappings for Dark Teal industrial primary accent */
+  --color-teal-900: #041F1F;
+  --color-teal-800: #072B2B;
+  --color-teal-700: #0B3333;
+  --color-teal-600: #0F3D3D;
+  --color-teal-500: #14B8A6;
+  --color-teal-100: #CCFBF1;
+  --color-teal-50: #F0FDFA;
 
-  --color-blue-600: #7C6EF0;
-  --color-blue-700: #6C5CE7;
-  --color-blue-500: #7C6EF0;
-  --color-blue-100: #F4F3FF;
-  --color-blue-50: #FAF9FF;
+  --color-indigo-700: #072B2B;
+  --color-indigo-600: #0B3333;
+  --color-indigo-500: #0F3D3D;
+  --color-indigo-400: #10B981;
+  --color-indigo-100: #E6F4F1;
+  --color-indigo-50: #F0F9F8;
 
-  --color-slate-200: #EEEDF5;
-  --color-slate-100: #F4F3FF;
-  --color-slate-50: #FAF9FD;
+  --color-blue-700: #072B2B;
+  --color-blue-600: #0B3333;
+  --color-blue-500: #0F3D3D;
+  --color-blue-100: #E6F4F1;
+  --color-blue-50: #F0F9F8;
+
+  --color-slate-200: #E2E8F0;
+  --color-slate-100: #F1F5F9;
+  --color-slate-50: #F8FAFC;
 }
 
 :root {
   --background: #FFFFFF;
-  --foreground: #1B1B1F;
+  --foreground: #0F172A;
 }
 
 .dark {
-  --background: #0F172A;
+  --background: #0B1120;
   --foreground: #F8FAFC;
 }
 
@@ -54,7 +63,7 @@ body {
 /* Custom subtle scrollbar */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #C7BFFA transparent;
+  scrollbar-color: #94A3B8 transparent;
 }
 ::-webkit-scrollbar {
   width: 6px;
@@ -64,9 +73,15 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #C7BFFA;
+  background: #CBD5E1;
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #7C6EF0;
+  background: #0B3333;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #14B8A6;
 }

@@ -21,8 +21,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   if (isLoading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-white dark:bg-slate-950">
-        <Loader2 className="w-10 h-10 animate-spin text-[#7C6EF0] mb-3" />
-        <p className="text-[#8B8B99] font-medium text-sm">
+        <Loader2 className="w-10 h-10 animate-spin text-[#0B3333] dark:text-emerald-400 mb-3" />
+        <p className="text-slate-500 dark:text-slate-400 font-medium text-sm">
           Loading StockFlow...
         </p>
       </div>
