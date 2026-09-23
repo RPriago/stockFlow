@@ -45,6 +45,7 @@ export default function LoginPage() {
         localStorage.setItem('stockflow-theme', 'dark');
       } else {
         document.documentElement.classList.remove('dark');
+        localStorage.setItem('stockflow-theme', 'light');
       }
     } catch {
       // ignore
@@ -75,11 +76,7 @@ export default function LoginPage() {
   const handleForgotPassword = (e: React.MouseEvent) => {
     e.preventDefault();
     setErrorMsg(null);
-    setInfoMsg(
-      language === 'id'
-        ? 'Sistem demo: silakan hubungi Super Admin untuk reset password akun Anda.'
-        : 'Demo environment: please contact your Super Admin to reset your account password.'
-    );
+    setInfoMsg(t('forgotPasswordNotice'));
   };
 
   return (
@@ -156,10 +153,10 @@ export default function LoginPage() {
           {/* Heading and Subtitle */}
           <div className="mb-8">
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-              Welcome Back!
+              {t('welcomeBack')}
             </h1>
             <p className="mt-2 text-xs sm:text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
-              Sign in to manage warehouse inventory, track stock levels, and monitor logistics in real time.
+              {t('signInSubtitle')}
             </p>
           </div>
 
@@ -186,7 +183,7 @@ export default function LoginPage() {
                 htmlFor="email"
                 className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5"
               >
-                Email
+                {t('emailAddress')}
               </label>
               <div className="relative rounded-xl">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -201,7 +198,7 @@ export default function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="block w-full pl-10 pr-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] text-sm transition-all"
-                  placeholder="Enter your email"
+                  placeholder={t('emailPlaceholder')}
                 />
               </div>
             </div>
@@ -212,7 +209,7 @@ export default function LoginPage() {
                 htmlFor="password"
                 className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5"
               >
-                Password
+                {t('password')}
               </label>
               <div className="relative rounded-xl">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -227,7 +224,7 @@ export default function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="block w-full pl-10 pr-10 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] text-sm transition-all"
-                  placeholder="Enter your password"
+                  placeholder={t('passwordPlaceholder')}
                 />
                 <button
                   type="button"
@@ -248,7 +245,7 @@ export default function LoginPage() {
                 onClick={handleForgotPassword}
                 className="text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-[#0B3333] dark:hover:text-emerald-400 hover:underline cursor-pointer"
               >
-                Forgot Password?
+                {t('forgotPassword')}
               </button>
             </div>
 
@@ -262,10 +259,10 @@ export default function LoginPage() {
                 {isSubmitting ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    <span>Signing In...</span>
+                    <span>{t('signingIn')}</span>
                   </>
                 ) : (
-                  'Sign In'
+                  t('signIn')
                 )}
               </button>
             </div>
@@ -274,12 +271,12 @@ export default function LoginPage() {
           {/* Bottom Switcher */}
           <div className="mt-8 text-center">
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Don&apos;t have an Account?{' '}
+              {t('dontHaveAccount')}{' '}
               <Link
                 href="/register"
                 className="font-semibold text-[#0B3333] dark:text-emerald-400 hover:underline cursor-pointer ml-1"
               >
-                Sign Up
+                {t('signUp')}
               </Link>
             </p>
           </div>
@@ -287,7 +284,7 @@ export default function LoginPage() {
 
         {/* Footer info */}
         <div className="text-center text-[11px] text-slate-400 dark:text-slate-500">
-          © 2026 StockFlow WMS. All rights reserved.
+          {t('copyright')}
         </div>
       </div>
 

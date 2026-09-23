@@ -86,7 +86,7 @@ export default function RegisterPage() {
     }
 
     if (!selectedRole) {
-      setErrorMsg(language === 'id' ? 'Silakan pilih peran akun' : 'Please select your role');
+      setErrorMsg(t('selectRole'));
       return;
     }
 
@@ -96,11 +96,15 @@ export default function RegisterPage() {
       await register(name.trim(), email.trim(), password, selectedRole as Role);
     } catch (err: unknown) {
       if (err instanceof ApiError) {
-        setErrorMsg(err.message || 'Registration failed');
+        setErrorMsg(err.message || (language === 'id' ? 'Pendaftaran gagal' : 'Registration failed'));
       } else if (err instanceof Error) {
         setErrorMsg(err.message);
       } else {
-        setErrorMsg('Registration failed. Please try again.');
+        setErrorMsg(
+          language === 'id'
+            ? 'Pendaftaran gagal. Silakan coba lagi.'
+            : 'Registration failed. Please try again.'
+        );
       }
     } finally {
       setIsSubmitting(false);
@@ -181,10 +185,10 @@ export default function RegisterPage() {
           {/* Heading and Subtitle */}
           <div className="mb-6">
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-              Create an Account
+              {t('createAccount')}
             </h1>
             <p className="mt-2 text-xs sm:text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
-              Sign up to manage warehouse inventory, track stock levels, and monitor logistics in real time.
+              {t('createAccountSubtitle')}
             </p>
           </div>
 
@@ -204,7 +208,7 @@ export default function RegisterPage() {
                 htmlFor="name"
                 className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5"
               >
-                Full Name
+                {t('fullName')}
               </label>
               <div className="relative rounded-xl">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -218,7 +222,7 @@ export default function RegisterPage() {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="block w-full pl-10 pr-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] text-sm transition-all"
-                  placeholder="Enter your full name"
+                  placeholder={t('fullNamePlaceholder')}
                 />
               </div>
             </div>
@@ -229,7 +233,7 @@ export default function RegisterPage() {
                 htmlFor="email"
                 className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5"
               >
-                Email
+                {t('emailAddress')}
               </label>
               <div className="relative rounded-xl">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -244,7 +248,7 @@ export default function RegisterPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="block w-full pl-10 pr-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] text-sm transition-all"
-                  placeholder="Enter your email"
+                  placeholder={t('emailPlaceholder')}
                 />
               </div>
             </div>
@@ -255,7 +259,7 @@ export default function RegisterPage() {
                 htmlFor="password"
                 className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5"
               >
-                Password
+                {t('password')}
               </label>
               <div className="relative rounded-xl">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -270,7 +274,7 @@ export default function RegisterPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="block w-full pl-10 pr-10 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] text-sm transition-all"
-                  placeholder="Enter your password"
+                  placeholder={t('passwordPlaceholder')}
                 />
                 <button
                   type="button"
@@ -290,7 +294,7 @@ export default function RegisterPage() {
                 htmlFor="role"
                 className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5"
               >
-                Role
+                {t('role')}
               </label>
               <div className="relative rounded-xl">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -307,10 +311,10 @@ export default function RegisterPage() {
                   }`}
                 >
                   <option value="" disabled>
-                    Select your role
+                    {t('selectRole')}
                   </option>
-                  <option value="warehouse_staff">Warehouse Staff</option>
-                  <option value="warehouse_manager">Warehouse Manager</option>
+                  <option value="warehouse_staff">{t('roleStaff')}</option>
+                  <option value="warehouse_manager">{t('roleManager')}</option>
                 </select>
                 <div className="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-slate-400">
                   <ChevronDown className="h-4 w-4" />
@@ -328,10 +332,10 @@ export default function RegisterPage() {
                 {isSubmitting ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    <span>Signing Up...</span>
+                    <span>{t('signingUp')}</span>
                   </>
                 ) : (
-                  'Sign Up'
+                  t('signUp')
                 )}
               </button>
             </div>
@@ -340,12 +344,12 @@ export default function RegisterPage() {
           {/* Bottom Switcher */}
           <div className="mt-6 text-center">
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Already have an account?{' '}
+              {t('alreadyHaveAccount')}{' '}
               <Link
                 href="/login"
                 className="font-semibold text-[#0B3333] dark:text-emerald-400 hover:underline cursor-pointer ml-1"
               >
-                Sign In
+                {t('signIn')}
               </Link>
             </p>
           </div>
@@ -353,7 +357,7 @@ export default function RegisterPage() {
 
         {/* Footer info */}
         <div className="text-center text-[11px] text-slate-400 dark:text-slate-500">
-          © 2026 StockFlow WMS. All rights reserved.
+          {t('copyright')}
         </div>
       </div>
 
