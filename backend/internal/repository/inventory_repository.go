@@ -36,6 +36,7 @@ type InventoryRepository interface {
 	RecordMovement(ctx context.Context, movement *models.InventoryMovement) error
 	FindMovements(ctx context.Context, params models.MovementQueryParam) ([]models.InventoryMovement, int64, error)
 	GetStats(ctx context.Context) (*models.InventoryStatsResponse, error)
+	GetTotalStockByWarehouse(ctx context.Context) (map[string]int, error)
 }
 
 type mongoInventoryRepository struct {
@@ -368,6 +369,9 @@ func (r *mongoInventoryRepository) FindItems(ctx context.Context, params models.
 	if params.Limit > 0 {
 		limit = params.Limit
 	}
+	if limit > 500 {
+		limit = 500
+	}
 	page := int64(1)
 	if params.Page > 0 {
 		page = params.Page
@@ -432,6 +436,9 @@ func (r *mongoInventoryRepository) FindMovements(ctx context.Context, params mod
 	limit := int64(20)
 	if params.Limit > 0 {
 		limit = params.Limit
+	}
+	if limit > 500 {
+		limit = 500
 	}
 	page := int64(1)
 	if params.Page > 0 {
@@ -507,4 +514,36 @@ func (r *mongoInventoryRepository) GetStats(ctx context.Context) (*models.Invent
 	}
 
 	return stats, nil
+}
+
+// GetTotalStockByWarehouse computes total quantity on hand grouped by warehouse_id via MongoDB aggregation (PERF-002).
+func (r *mongoInventoryRepository) GetTotalStockByWarehouse(ctx context.Context) (map[string]int, error) {
+	pipeline := mongo.Pipeline{
+		bson.D{{Key: "$group", Value: bson.D{
+			{Key: "_id", Value: "$warehouse_id"},
+			{Key: "total_stock", Value: bson.D{{Key: "$sum", Value: "$quantity_on_hand"}}},
+		}}},
+	}
+
+	cursor, err := r.inventoryColl.Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	type aggResult struct {
+		WarehouseID primitive.ObjectID `bson:"_id"`
+		TotalStock  int                `bson:"total_stock"`
+	}
+
+	var results []aggResult
+	if err := cursor.All(ctx, &results); err != nil {
+		return nil, err
+	}
+
+	res := make(map[string]int, len(results))
+	for _, r := range results {
+		res[r.WarehouseID.Hex()] = r.TotalStock
+	}
+	return res, nil
 }

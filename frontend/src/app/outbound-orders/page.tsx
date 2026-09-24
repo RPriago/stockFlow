@@ -33,21 +33,20 @@ import {
   Building2,
   Eye,
   Ban,
-  DollarSign,
   PackageCheck,
   Clock,
   Trash2,
   Phone,
   Mail,
-  User as UserIcon,
-  MapPin,
-  FileText,
   Boxes,
   ArrowRight,
   Send,
   Check,
   Edit2,
-  ShoppingBag,
+  ArrowUpRight,
+  ArrowDownRight,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 
 interface FormLineItem {
@@ -59,8 +58,8 @@ interface FormLineItem {
 }
 
 export default function OutboundOrdersPage() {
-  const { user, role } = useAuth();
-  const { t, language } = useLanguage();
+  const { role } = useAuth();
+  const { language } = useLanguage();
   const canManage = role === 'super_admin' || role === 'warehouse_manager';
   const canCreate = role === 'super_admin' || role === 'warehouse_manager' || role === 'warehouse_staff';
 
@@ -85,6 +84,76 @@ export default function OutboundOrdersPage() {
   const [warehouseFilter, setWarehouseFilter] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [customerSearchQuery, setCustomerSearchQuery] = useState<string>('');
+
+  // Responsive KPI metrics collapse state
+  const [showAllMetrics, setShowAllMetrics] = useState(false);
+  const [currentTime, setCurrentTime] = useState<number>(0);
+
+  useEffect(() => {
+    setCurrentTime(Date.now());
+  }, []);
+
+  // Precise 7-day metric calculations (rounded to 1 decimal place)
+  const soMetrics = useMemo(() => {
+    const now = currentTime || 0;
+    const sevenDaysAgo = now > 0 ? now - 7 * 24 * 60 * 60 * 1000 : 0;
+
+    const calcDiff = (current: number, recentCount: number, isGoodWhenUp: boolean = true) => {
+      const baseline = current - recentCount;
+      let change = '+0.0%';
+      let isPositive = isGoodWhenUp;
+
+      if (baseline > 0) {
+        const pct = (recentCount / baseline) * 100;
+        change = `+${pct.toFixed(1)}%`;
+        isPositive = isGoodWhenUp;
+      } else if (current > 0) {
+        change = '+100.0%';
+        isPositive = isGoodWhenUp;
+      } else {
+        change = '+0.0%';
+        isPositive = true;
+      }
+      return { change, isPositive };
+    };
+
+    // 1. Total Orders
+    const totalOrders = stats?.total_orders ?? orders.length;
+    const recentOrders = orders.filter(o => sevenDaysAgo > 0 && new Date(o.created_at).getTime() >= sevenDaysAgo);
+    const totalMetric = calcDiff(totalOrders, recentOrders.length, true);
+
+    // 2. Fulfillment (confirmed / picking / packing)
+    const fulfillmentOrders = orders.filter(o => ['confirmed', 'picking', 'packing'].includes(o.status));
+    const totalFulfillment = stats?.pending_fulfillment ?? fulfillmentOrders.length;
+    const recentFulfillment = fulfillmentOrders.filter(o => sevenDaysAgo > 0 && new Date(o.created_at).getTime() >= sevenDaysAgo);
+    const fulfillmentMetric = calcDiff(totalFulfillment, recentFulfillment.length, true);
+
+    // 3. In Transit (shipped)
+    const shippedOrders = orders.filter(o => o.status === 'shipped');
+    const totalShipped = stats?.shipped_orders ?? shippedOrders.length;
+    const recentShipped = shippedOrders.filter(o => sevenDaysAgo > 0 && new Date(o.created_at).getTime() >= sevenDaysAgo);
+    const shippedMetric = calcDiff(totalShipped, recentShipped.length, true);
+
+    // 4. Delivered
+    const deliveredOrders = orders.filter(o => o.status === 'delivered');
+    const totalDelivered = stats?.delivered_orders ?? deliveredOrders.length;
+    const recentDelivered = deliveredOrders.filter(o => sevenDaysAgo > 0 && new Date(o.created_at).getTime() >= sevenDaysAgo);
+    const deliveredMetric = calcDiff(totalDelivered, recentDelivered.length, true);
+
+    // 5. Total Revenue
+    const totalRev = stats?.total_revenue ?? orders.filter(o => ['shipped', 'delivered'].includes(o.status)).reduce((sum, o) => sum + (Number(o.total_amount) || 0), 0);
+    const recentRevOrders = recentOrders.filter(o => ['shipped', 'delivered'].includes(o.status));
+    const recentRevenue = recentRevOrders.reduce((sum, o) => sum + (Number(o.total_amount) || 0), 0);
+    const revenueMetric = calcDiff(totalRev, recentRevenue, true);
+
+    return {
+      total: { value: totalOrders, ...totalMetric },
+      fulfillment: { value: totalFulfillment, ...fulfillmentMetric },
+      shipped: { value: totalShipped, ...shippedMetric },
+      delivered: { value: totalDelivered, ...deliveredMetric },
+      revenue: { value: totalRev, ...revenueMetric },
+    };
+  }, [orders, stats, currentTime]);
 
   // Alerts
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -171,8 +240,8 @@ export default function OutboundOrdersPage() {
         const locs: Location[] = locRes.data;
         setWarehouseLocations((prev) => ({ ...prev, [whId]: locs }));
       }
-      if (invRes.data && (invRes.data as any).items && !warehouseInventory[whId]) {
-        const items: InventoryItem[] = (invRes.data as any).items;
+      if (invRes.data && typeof invRes.data === 'object' && 'items' in invRes.data && !warehouseInventory[whId]) {
+        const items: InventoryItem[] = (invRes.data as { items: InventoryItem[] }).items;
         setWarehouseInventory((prev) => ({ ...prev, [whId]: items }));
       }
     } catch (err) {
@@ -192,8 +261,8 @@ export default function OutboundOrdersPage() {
       if (res.data && res.data.orders) {
         setOrders(res.data.orders);
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to fetch sales orders');
+    } catch (err: unknown) {
+      setErrorMsg((err as Error).message || 'Failed to fetch sales orders');
     }
   }, [statusFilter, warehouseFilter, searchQuery]);
 
@@ -215,32 +284,38 @@ export default function OutboundOrdersPage() {
       const res = await api.get<Customer[]>('/customers');
       if (res.data) {
         setCustomers(res.data);
-        setCustomers(res.data || []);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to fetch customers', err);
     }
   }, []);
 
   // Initial Data Load
   useEffect(() => {
+    let mounted = true;
     const init = async () => {
       setIsLoading(true);
-      await Promise.all([loadMetadata(), fetchOrders(), fetchStats()]);
-      setIsLoading(false);
+      await Promise.all([loadMetadata(), fetchStats()]);
+      if (mounted) setIsLoading(false);
     };
-    init();
-  }, [loadMetadata, fetchOrders, fetchStats]);
+    const timer = setTimeout(() => void init(), 0);
+    return () => {
+      mounted = false;
+      clearTimeout(timer);
+    };
+  }, [loadMetadata, fetchStats]);
 
   // When filters change
   useEffect(() => {
-    fetchOrders();
+    const timer = setTimeout(() => void fetchOrders(), 0);
+    return () => clearTimeout(timer);
   }, [fetchOrders]);
 
   // Real-time auto-refresh across browsers
   useEffect(() => {
-    const handleSync = (e: any) => {
-      const resource = e?.detail?.resource;
+    const handleSync = (e: Event) => {
+      const customEvent = e as CustomEvent<{ resource?: string }>;
+      const resource = customEvent?.detail?.resource;
       if (
         !resource ||
         resource === 'sales_orders' ||
@@ -290,8 +365,8 @@ export default function OutboundOrdersPage() {
         );
       case 'confirmed':
         return (
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#F4F3FF] dark:bg-[#7C6EF0]/15 text-[#6C5CE7] dark:text-[#A594FD] border border-[#E0DCFC] dark:border-[#7C6EF0]/30">
-            <Boxes className="w-3 h-3 mr-1 text-[#7C6EF0]" />
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#0B3333]/10 dark:bg-[#0B3333]/20 text-[#0B3333] dark:text-[#2dd4bf] border border-[#0B3333]/20">
+            <Boxes className="w-3 h-3 mr-1 text-[#0B3333] dark:text-[#2dd4bf]" />
             {language === 'id' ? 'Stok Direservasi' : 'Stock Reserved'}
           </span>
         );
@@ -304,15 +379,15 @@ export default function OutboundOrdersPage() {
         );
       case 'packing':
         return (
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200/60 dark:border-purple-800/60">
-            <PackageCheck className="w-3 h-3 mr-1 text-purple-500" />
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border border-teal-200/60 dark:border-teal-800/60">
+            <PackageCheck className="w-3 h-3 mr-1 text-teal-500" />
             {language === 'id' ? 'Pengepakan Paket' : 'Packing Parcel'}
           </span>
         );
       case 'shipped':
         return (
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/60">
-            <Truck className="w-3 h-3 mr-1 text-indigo-500" />
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800/60">
+            <Truck className="w-3 h-3 mr-1 text-blue-500" />
             {language === 'id' ? 'Dalam Pengiriman' : 'In Transit'}
           </span>
         );
@@ -404,7 +479,7 @@ export default function OutboundOrdersPage() {
                     isDone
                       ? 'bg-emerald-600 text-white shadow-sm'
                       : isCurrent
-                      ? 'bg-blue-600 text-white ring-4 ring-blue-100 dark:ring-blue-900/50 shadow-md'
+                      ? 'bg-[#0B3333] text-white ring-4 ring-[#0B3333]/15 shadow-sm'
                       : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
                   }`}
                 >
@@ -413,7 +488,7 @@ export default function OutboundOrdersPage() {
                 <p
                   className={`mt-2 text-xs font-semibold ${
                     isCurrent
-                      ? 'text-blue-600 dark:text-blue-400'
+                      ? 'text-[#0B3333] dark:text-[#2dd4bf]'
                       : isDone
                       ? 'text-emerald-600 dark:text-emerald-400'
                       : 'text-slate-500 dark:text-slate-400'
@@ -516,7 +591,7 @@ export default function OutboundOrdersPage() {
     });
   };
 
-  const handleItemFieldChange = (index: number, field: keyof FormLineItem, value: any) => {
+  const handleItemFieldChange = (index: number, field: keyof FormLineItem, value: FormLineItem[keyof FormLineItem]) => {
     setSoItems((prev) => {
       const updated = [...prev];
       updated[index] = {
@@ -610,8 +685,8 @@ export default function OutboundOrdersPage() {
       setSuccessMsg(`Sales Order ${res.data?.order_number || ''} created successfully as Draft.`);
       fetchOrders();
       fetchStats();
-    } catch (err: any) {
-      setModalError(err.message || 'Failed to create sales order');
+    } catch (err: unknown) {
+      setModalError((err as Error).message || 'Failed to create sales order');
     } finally {
       setIsSubmitting(false);
     }
@@ -630,8 +705,8 @@ export default function OutboundOrdersPage() {
         const updated = await api.get<SalesOrder>(`/sales-orders/${orderId}`);
         if (updated.data) setSelectedOrder(updated.data);
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to confirm order');
+    } catch (err: unknown) {
+      setErrorMsg((err as Error).message || 'Failed to confirm order');
     } finally {
       setIsSubmitting(false);
     }
@@ -648,8 +723,8 @@ export default function OutboundOrdersPage() {
         const updated = await api.get<SalesOrder>(`/sales-orders/${orderId}`);
         if (updated.data) setSelectedOrder(updated.data);
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to update order status to picking');
+    } catch (err: unknown) {
+      setErrorMsg((err as Error).message || 'Failed to update order status to picking');
     } finally {
       setIsSubmitting(false);
     }
@@ -666,8 +741,8 @@ export default function OutboundOrdersPage() {
         const updated = await api.get<SalesOrder>(`/sales-orders/${orderId}`);
         if (updated.data) setSelectedOrder(updated.data);
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to update order status to packing');
+    } catch (err: unknown) {
+      setErrorMsg((err as Error).message || 'Failed to update order status to packing');
     } finally {
       setIsSubmitting(false);
     }
@@ -715,8 +790,8 @@ export default function OutboundOrdersPage() {
         const updated = await api.get<SalesOrder>(`/sales-orders/${selectedOrder.id}`);
         if (updated.data) setSelectedOrder(updated.data);
       }
-    } catch (err: any) {
-      setModalError(err.message || 'Failed to dispatch order');
+    } catch (err: unknown) {
+      setModalError((err as Error).message || 'Failed to dispatch order');
     } finally {
       setIsSubmitting(false);
     }
@@ -734,8 +809,8 @@ export default function OutboundOrdersPage() {
         const updated = await api.get<SalesOrder>(`/sales-orders/${orderId}`);
         if (updated.data) setSelectedOrder(updated.data);
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to mark order delivered');
+    } catch (err: unknown) {
+      setErrorMsg((err as Error).message || 'Failed to mark order delivered');
     } finally {
       setIsSubmitting(false);
     }
@@ -753,8 +828,8 @@ export default function OutboundOrdersPage() {
         const updated = await api.get<SalesOrder>(`/sales-orders/${orderId}`);
         if (updated.data) setSelectedOrder(updated.data);
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to cancel sales order');
+    } catch (err: unknown) {
+      setErrorMsg((err as Error).message || 'Failed to cancel sales order');
     } finally {
       setIsSubmitting(false);
     }
@@ -821,8 +896,8 @@ export default function OutboundOrdersPage() {
       }
       setShowCustomerModal(false);
       fetchCustomers();
-    } catch (err: any) {
-      setModalError(err.message || 'Failed to save customer');
+    } catch (err: unknown) {
+      setModalError((err as Error).message || 'Failed to save customer');
     } finally {
       setIsSubmitting(false);
     }
@@ -877,7 +952,7 @@ export default function OutboundOrdersPage() {
                 fetchStats();
                 fetchCustomers();
               }}
-              className="p-2 sm:p-2.5 rounded-full border border-[#EEEDF5] dark:border-slate-700 bg-white dark:bg-slate-800 text-[#8B8B99] dark:text-slate-400 hover:text-[#7C6EF0] hover:border-[#7C6EF0] transition-colors shadow-xs cursor-pointer"
+              className="p-2 sm:p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors shadow-xs cursor-pointer"
               title={language === 'id' ? 'Segarkan Data' : 'Refresh Data'}
             >
               <RefreshCw className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[1.8]" />
@@ -886,7 +961,7 @@ export default function OutboundOrdersPage() {
             {canCreate && (
               <button
                 onClick={() => openCreateSOModal()}
-                className="inline-flex items-center gap-1.5 sm:gap-2 px-3.5 sm:px-4 py-2 rounded-full bg-[#7C6EF0] text-white text-xs sm:text-sm font-semibold hover:bg-[#6C5CE7] transition-all shadow-sm shadow-[#7C6EF0]/20 cursor-pointer"
+                className="inline-flex items-center gap-1.5 sm:gap-2 px-4 py-2.5 rounded-xl bg-[#0B3333] text-white text-xs sm:text-sm font-medium hover:bg-[#0B3333]/90 transition-all shadow-sm cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" />
                 <span>{language === 'id' ? 'Sales Order Baru' : 'New Sales Order'}</span>
@@ -897,90 +972,171 @@ export default function OutboundOrdersPage() {
 
         {/* Metrics Overview Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 sm:gap-4">
-          <div className="p-4 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+          {/* Card 1: TOTAL ORDERS (Core Metric) */}
+          <div className={`p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col justify-between ${
+            !showAllMetrics ? 'sm:col-span-2 lg:col-span-1' : ''
+          }`}>
+            <div>
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                 {language === 'id' ? 'Total Pesanan' : 'Total Orders'}
               </span>
-              <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-700/50 text-slate-600 dark:text-slate-300 flex items-center justify-center">
-                <FileText className="w-4 h-4" />
+            </div>
+            <div className="mt-2">
+              <p className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white tabular-nums font-sans">
+                {soMetrics.total.value.toLocaleString('id-ID')}
+              </p>
+              <div className="flex items-center gap-1.5 mt-2">
+                <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold ${
+                  soMetrics.total.isPositive
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
+                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
+                }`}>
+                  {soMetrics.total.isPositive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                  {soMetrics.total.change}
+                </span>
+                <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                  {language === 'id' ? '7 hari terakhir' : 'Last 7 days'}
+                </span>
               </div>
             </div>
-            <p className="mt-2 text-2xl font-bold text-slate-900 dark:text-white">
-              {stats?.total_orders ?? 0}
-            </p>
-            <span className="text-xs text-slate-400">
-              {language === 'id' ? 'Semua pesanan keluar' : 'All outbound orders'}
-            </span>
           </div>
 
-          <div className="p-4 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+          {/* Card 2: FULFILLMENT */}
+          <div className={`p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col justify-between ${
+            !showAllMetrics ? 'hidden lg:flex' : 'flex'
+          }`}>
+            <div>
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                 {language === 'id' ? 'Pemenuhan' : 'Fulfillment'}
               </span>
-              <div className="w-8 h-8 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 flex items-center justify-center">
-                <Clock className="w-4 h-4" />
+            </div>
+            <div className="mt-2">
+              <p className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white tabular-nums font-sans">
+                {soMetrics.fulfillment.value.toLocaleString('id-ID')}
+              </p>
+              <div className="flex items-center gap-1.5 mt-2">
+                <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold ${
+                  soMetrics.fulfillment.isPositive
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
+                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
+                }`}>
+                  {soMetrics.fulfillment.isPositive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                  {soMetrics.fulfillment.change}
+                </span>
+                <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                  {language === 'id' ? '7 hari terakhir' : 'Last 7 days'}
+                </span>
               </div>
             </div>
-            <p className="mt-2 text-2xl font-bold text-slate-900 dark:text-white">
-              {stats?.pending_fulfillment ?? 0}
-            </p>
-            <span className="text-xs text-slate-400">
-              {language === 'id' ? 'Direservasi / Pick / Pack' : 'Reserved / Pick / Pack'}
-            </span>
           </div>
 
-          <div className="p-4 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+          {/* Card 3: IN TRANSIT */}
+          <div className={`p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col justify-between ${
+            !showAllMetrics ? 'hidden lg:flex' : 'flex'
+          }`}>
+            <div>
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                 {language === 'id' ? 'Dalam Pengiriman' : 'In Transit'}
               </span>
-              <div className="w-8 h-8 rounded-full bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
-                <Truck className="w-4 h-4" />
+            </div>
+            <div className="mt-2">
+              <p className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white tabular-nums font-sans">
+                {soMetrics.shipped.value.toLocaleString('id-ID')}
+              </p>
+              <div className="flex items-center gap-1.5 mt-2">
+                <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold ${
+                  soMetrics.shipped.isPositive
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
+                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
+                }`}>
+                  {soMetrics.shipped.isPositive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                  {soMetrics.shipped.change}
+                </span>
+                <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                  {language === 'id' ? '7 hari terakhir' : 'Last 7 days'}
+                </span>
               </div>
             </div>
-            <p className="mt-2 text-2xl font-bold text-slate-900 dark:text-white">
-              {stats?.shipped_orders ?? 0}
-            </p>
-            <span className="text-xs text-slate-400">
-              {language === 'id' ? 'Dikirim via ekspedisi' : 'Shipped with carrier'}
-            </span>
           </div>
 
-          <div className="p-4 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+          {/* Card 4: DELIVERED */}
+          <div className={`p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col justify-between ${
+            !showAllMetrics ? 'hidden lg:flex' : 'flex'
+          }`}>
+            <div>
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                 {language === 'id' ? 'Terkirim' : 'Delivered'}
               </span>
-              <div className="w-8 h-8 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-                <CheckCircle2 className="w-4 h-4" />
+            </div>
+            <div className="mt-2">
+              <p className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white tabular-nums font-sans">
+                {soMetrics.delivered.value.toLocaleString('id-ID')}
+              </p>
+              <div className="flex items-center gap-1.5 mt-2">
+                <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold ${
+                  soMetrics.delivered.isPositive
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
+                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
+                }`}>
+                  {soMetrics.delivered.isPositive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                  {soMetrics.delivered.change}
+                </span>
+                <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                  {language === 'id' ? '7 hari terakhir' : 'Last 7 days'}
+                </span>
               </div>
             </div>
-            <p className="mt-2 text-2xl font-bold text-slate-900 dark:text-white">
-              {stats?.delivered_orders ?? 0}
-            </p>
-            <span className="text-xs text-slate-400">
-              {language === 'id' ? 'Pengiriman selesai' : 'Completed deliveries'}
-            </span>
           </div>
 
-          <div className="p-4 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs col-span-2 md:col-span-1">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+          {/* Card 5: TOTAL REVENUE */}
+          <div className={`p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col justify-between ${
+            !showAllMetrics ? 'hidden lg:flex' : 'col-span-1 sm:col-span-2 md:col-span-1 flex'
+          }`}>
+            <div>
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                 {language === 'id' ? 'Total Pendapatan' : 'Total Revenue'}
               </span>
-              <div className="w-8 h-8 rounded-full bg-[#F4F3FF] dark:bg-[#7C6EF0]/15 text-[#7C6EF0] dark:text-[#A594FD] flex items-center justify-center">
-                <DollarSign className="w-4 h-4" />
+            </div>
+            <div className="mt-2">
+              <p className="text-xl sm:text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white truncate tabular-nums font-sans">
+                {formatCurrency(soMetrics.revenue.value)}
+              </p>
+              <div className="flex items-center gap-1.5 mt-2">
+                <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold ${
+                  soMetrics.revenue.isPositive
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
+                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
+                }`}>
+                  {soMetrics.revenue.isPositive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                  {soMetrics.revenue.change}
+                </span>
+                <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                  {language === 'id' ? '7 hari terakhir' : 'Last 7 days'}
+                </span>
               </div>
             </div>
-            <p className="mt-2 text-xl font-bold text-slate-900 dark:text-white truncate">
-              {formatCurrency(stats?.total_revenue ?? 0)}
-            </p>
-            <span className="text-xs text-slate-400">
-              {language === 'id' ? 'Dikirim & Terkirim' : 'Dispatched & Delivered'}
-            </span>
           </div>
+        </div>
+
+        {/* Responsive Toggle for Metric Cards */}
+        <div className="lg:hidden">
+          <button
+            type="button"
+            onClick={() => setShowAllMetrics((prev) => !prev)}
+            aria-expanded={showAllMetrics}
+            className="w-full py-2.5 px-4 rounded-xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60 shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            <span>
+              {showAllMetrics
+                ? (language === 'id' ? 'Sembunyikan metrik' : 'Show less metrics')
+                : (language === 'id' ? 'Lihat 4 metrik lainnya' : 'Show 4 more metrics')}
+            </span>
+            {showAllMetrics ? (
+              <ChevronUp className="w-3.5 h-3.5 stroke-[2]" />
+            ) : (
+              <ChevronDown className="w-3.5 h-3.5 stroke-[2]" />
+            )}
+          </button>
         </div>
 
         {/* Tab Navigation */}
@@ -989,7 +1145,7 @@ export default function OutboundOrdersPage() {
             onClick={() => setActiveTab('orders')}
             className={`pb-3 text-sm font-semibold border-b-2 transition-colors flex items-center space-x-2 ${
               activeTab === 'orders'
-                ? 'border-[#7C6EF0] text-[#7C6EF0] dark:border-[#9B8DFC] dark:text-[#9B8DFC]'
+                ? 'border-[#0B3333] text-[#0B3333] dark:border-[#2dd4bf] dark:text-[#2dd4bf]'
                 : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
             }`}
           >
@@ -1004,7 +1160,7 @@ export default function OutboundOrdersPage() {
             onClick={() => setActiveTab('customers')}
             className={`pb-3 text-sm font-semibold border-b-2 transition-colors flex items-center space-x-2 ${
               activeTab === 'customers'
-                ? 'border-[#7C6EF0] text-[#7C6EF0] dark:border-[#9B8DFC] dark:text-[#9B8DFC]'
+                ? 'border-[#0B3333] text-[#0B3333] dark:border-[#2dd4bf] dark:text-[#2dd4bf]'
                 : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
             }`}
           >
@@ -1071,8 +1227,8 @@ export default function OutboundOrdersPage() {
                   onClick={() => setStatusFilter(pill.val)}
                   className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
                     statusFilter === pill.val
-                      ? 'bg-[#7C6EF0] text-white shadow-xs'
-                      : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                      ? 'bg-[#0B3333] text-white shadow-xs'
+                      : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60'
                   }`}
                 >
                   {pill.label}
@@ -1081,10 +1237,10 @@ export default function OutboundOrdersPage() {
             </div>
 
             {/* Orders Table */}
-            <div className="bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs overflow-hidden">
               {isLoading ? (
                 <div className="p-12 flex flex-col items-center justify-center space-y-3">
-                  <Loader2 className="w-8 h-8 text-[#7C6EF0] animate-spin" />
+                  <Loader2 className="w-8 h-8 text-[#0B3333] dark:text-[#2dd4bf] animate-spin" />
                   <p className="text-sm text-slate-500">
                     {language === 'id' ? 'Memuat sales order...' : 'Loading sales orders...'}
                   </p>
@@ -1103,7 +1259,7 @@ export default function OutboundOrdersPage() {
                   {canCreate && !searchQuery && !statusFilter && (
                     <button
                       onClick={() => openCreateSOModal()}
-                      className="mt-4 inline-flex items-center px-4 py-2 bg-[#7C6EF0] hover:bg-[#6C5CE7] text-white text-sm font-semibold rounded-xl space-x-2 transition-colors shadow-xs"
+                      className="mt-4 inline-flex items-center px-4 py-2 bg-[#0B3333] hover:bg-[#0B3333]/90 text-white text-sm font-medium rounded-xl space-x-2 transition-colors shadow-xs"
                     >
                       <Plus className="w-4 h-4" />
                       <span>{language === 'id' ? 'Buat Sales Order' : 'Create Sales Order'}</span>
@@ -1137,7 +1293,7 @@ export default function OutboundOrdersPage() {
                                 setSelectedOrder(so);
                                 setShowDetailModal(true);
                               }}
-                              className="font-mono font-semibold text-[#7C6EF0] dark:text-[#A594FD] hover:underline"
+                              className="font-mono font-semibold text-[#0B3333] dark:text-[#2dd4bf] hover:underline"
                             >
                               {so.order_number}
                             </button>
@@ -1188,7 +1344,7 @@ export default function OutboundOrdersPage() {
                               {canManage && so.status === 'draft' && (
                                 <button
                                   onClick={() => handleConfirmSO(so.id)}
-                                  className="px-2.5 py-1 bg-[#7C6EF0] hover:bg-[#6C5CE7] text-white text-xs font-semibold rounded-lg shadow-xs transition-colors flex items-center space-x-1"
+                                  className="px-2.5 py-1 bg-[#0B3333] hover:bg-[#0B3333]/90 text-white text-xs font-medium rounded-lg shadow-xs transition-colors flex items-center space-x-1"
                                   title={language === 'id' ? 'Konfirmasi & Reservasi Stok' : 'Confirm & Reserve Stock'}
                                 >
                                   <Boxes className="w-3.5 h-3.5" />
@@ -1200,7 +1356,7 @@ export default function OutboundOrdersPage() {
                               {so.status === 'confirmed' && (
                                 <button
                                   onClick={() => handleStartPicking(so.id)}
-                                  className="px-2.5 py-1 bg-[#7C6EF0] hover:bg-[#6C5CE7] text-white text-xs font-semibold rounded-lg shadow-xs transition-colors flex items-center space-x-1"
+                                  className="px-2.5 py-1 bg-[#0B3333] hover:bg-[#0B3333]/90 text-white text-xs font-medium rounded-lg shadow-xs transition-colors flex items-center space-x-1"
                                   title={language === 'id' ? 'Mulai Pengambilan Barang' : 'Start Picking Items'}
                                 >
                                   <ArrowRight className="w-3.5 h-3.5" />
@@ -1212,7 +1368,7 @@ export default function OutboundOrdersPage() {
                               {so.status === 'picking' && (
                                 <button
                                   onClick={() => handleStartPacking(so.id)}
-                                  className="px-2.5 py-1 bg-[#7C6EF0] hover:bg-[#6C5CE7] text-white text-xs font-semibold rounded-lg shadow-xs transition-colors flex items-center space-x-1"
+                                  className="px-2.5 py-1 bg-[#0B3333] hover:bg-[#0B3333]/90 text-white text-xs font-medium rounded-lg shadow-xs transition-colors flex items-center space-x-1"
                                   title={language === 'id' ? 'Tandai Barang Dikemas' : 'Mark Items as Packed'}
                                 >
                                   <PackageCheck className="w-3.5 h-3.5" />
@@ -1224,7 +1380,7 @@ export default function OutboundOrdersPage() {
                               {so.status === 'packing' && (
                                 <button
                                   onClick={() => openDispatchModal(so)}
-                                  className="px-2.5 py-1 bg-[#7C6EF0] hover:bg-[#6C5CE7] text-white text-xs font-semibold rounded-lg shadow-xs transition-colors flex items-center space-x-1"
+                                  className="px-2.5 py-1 bg-[#0B3333] hover:bg-[#0B3333]/90 text-white text-xs font-medium rounded-lg shadow-xs transition-colors flex items-center space-x-1"
                                   title={language === 'id' ? 'Kirim Pesanan' : 'Dispatch & Ship Order'}
                                 >
                                   <Truck className="w-3.5 h-3.5" />
@@ -1236,7 +1392,7 @@ export default function OutboundOrdersPage() {
                               {so.status === 'shipped' && (
                                 <button
                                   onClick={() => handleDeliverSO(so.id)}
-                                  className="px-2.5 py-1 bg-[#7C6EF0] hover:bg-[#6C5CE7] text-white text-xs font-semibold rounded-lg shadow-xs transition-colors flex items-center space-x-1"
+                                  className="px-2.5 py-1 bg-[#0B3333] hover:bg-[#0B3333]/90 text-white text-xs font-medium rounded-lg shadow-xs transition-colors flex items-center space-x-1"
                                   title={language === 'id' ? 'Tandai Terkirim' : 'Mark Delivered'}
                                 >
                                   <CheckCircle2 className="w-3.5 h-3.5" />
@@ -1440,7 +1596,7 @@ export default function OutboundOrdersPage() {
                       value={soCustomerId}
                       onChange={(e) => handleCustomerSelectChange(e.target.value)}
                       required
-                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     >
                       <option value="">{language === 'id' ? 'Pilih Pelanggan...' : 'Select Customer...'}</option>
                       {customers.map((c) => (
@@ -1459,7 +1615,7 @@ export default function OutboundOrdersPage() {
                       value={soWarehouseId}
                       onChange={(e) => handleWarehouseSelectChange(e.target.value)}
                       required
-                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     >
                       <option value="">{language === 'id' ? 'Pilih Gudang...' : 'Select Warehouse...'}</option>
                       {warehouses.map((wh) => (
@@ -1480,7 +1636,7 @@ export default function OutboundOrdersPage() {
                       onChange={(e) => setSoShippingAddress(e.target.value)}
                       placeholder={language === 'id' ? 'Masukkan alamat tujuan pengiriman lengkap dengan kontak penerima...' : 'Enter destination shipping address with recipient details...'}
                       required
-                      className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] resize-none transition-colors"
+                      className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] resize-none transition-colors"
                     />
                   </div>
 
@@ -1493,7 +1649,7 @@ export default function OutboundOrdersPage() {
                       value={soNotes}
                       onChange={(e) => setSoNotes(e.target.value)}
                       placeholder={language === 'id' ? 'Penanganan khusus, instruksi pengiriman cepat, dll.' : 'Special handling, expedited delivery instructions, etc.'}
-                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     />
                   </div>
                 </div>
@@ -1507,7 +1663,7 @@ export default function OutboundOrdersPage() {
                     <button
                       type="button"
                       onClick={handleAddItemRow}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#7C6EF0] dark:text-[#9B8FF3] bg-[#7C6EF0]/10 hover:bg-[#7C6EF0]/20 rounded-xl transition-colors cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#0B3333] dark:text-[#2dd4bf] bg-[#0B3333]/10 hover:bg-[#0B3333]/20 rounded-xl transition-colors cursor-pointer"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>{language === 'id' ? 'Tambah Item' : 'Add Item'}</span>
@@ -1554,7 +1710,7 @@ export default function OutboundOrdersPage() {
                                 value={item.product_id}
                                 onChange={(e) => handleItemProductChange(idx, e.target.value)}
                                 required
-                                className="w-full h-10 px-3 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                                className="w-full h-10 px-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                               >
                                 <option value="">{language === 'id' ? 'Pilih Produk...' : 'Select Product...'}</option>
                                 {products.map((p) => (
@@ -1577,7 +1733,7 @@ export default function OutboundOrdersPage() {
                                 }
                                 required
                                 disabled={!soWarehouseId}
-                                className="w-full h-10 px-3 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors disabled:opacity-50"
+                                className="w-full h-10 px-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors disabled:opacity-50"
                               >
                                 <option value="">{language === 'id' ? 'Pilih Lokasi Bin...' : 'Select Bin Location...'}</option>
                                 {availableLocations.map((loc) => {
@@ -1631,7 +1787,7 @@ export default function OutboundOrdersPage() {
                                   }
                                 }}
                                 required
-                                className="w-full h-10 px-3 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                                className="w-full h-10 px-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                               />
                             </div>
 
@@ -1660,7 +1816,7 @@ export default function OutboundOrdersPage() {
                                   }
                                 }}
                                 required
-                                className="w-full h-10 px-3 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                                className="w-full h-10 px-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                               />
                               <p className="text-[11px] text-right font-medium text-slate-500 dark:text-slate-400 mt-1.5">
                                 Subtotal: <strong className="text-slate-900 dark:text-white">{formatCurrency(subtotal)}</strong>
@@ -1689,14 +1845,14 @@ export default function OutboundOrdersPage() {
                     <button
                       type="button"
                       onClick={() => setShowCreateSOModal(false)}
-                      className="flex-1 sm:flex-none px-5 py-2.5 text-sm font-semibold rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                      className="flex-1 sm:flex-none px-4 py-2 text-sm font-medium rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                     >
                       {language === 'id' ? 'Batal' : 'Cancel'}
                     </button>
                     <button
                       type="submit"
                       disabled={isSubmitting}
-                      className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-[#7C6EF0] hover:bg-[#6C5CE7] text-white font-semibold text-sm transition-all shadow-sm shadow-[#7C6EF0]/20 cursor-pointer disabled:opacity-50"
+                      className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#0B3333] hover:bg-[#0B3333]/90 text-white font-medium text-sm transition-all shadow-sm cursor-pointer disabled:opacity-50"
                     >
                       {isSubmitting ? (
                         <Loader2 className="w-4 h-4 animate-spin" />
@@ -1753,7 +1909,7 @@ export default function OutboundOrdersPage() {
                     {selectedOrder.carrier && (
                       <div>
                         <span className="text-slate-400">{language === 'id' ? 'Ekspedisi & Resi:' : 'Carrier & Tracking:'}</span>
-                        <p className="font-semibold text-indigo-600 dark:text-indigo-400 mt-0.5">
+                        <p className="font-semibold text-[#0B3333] dark:text-[#2dd4bf] mt-0.5">
                           {selectedOrder.carrier} — {selectedOrder.tracking_number}
                         </p>
                       </div>
@@ -1915,7 +2071,7 @@ export default function OutboundOrdersPage() {
                         type="button"
                         onClick={() => handleStartPacking(selectedOrder.id)}
                         disabled={isSubmitting}
-                        className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold rounded-xl transition-colors flex items-center space-x-1.5"
+                        className="px-4 py-2 bg-[#0B3333] hover:bg-[#0B3333]/90 text-white text-xs font-medium rounded-xl transition-colors flex items-center space-x-1.5"
                       >
                         <PackageCheck className="w-3.5 h-3.5" />
                         <span>{language === 'id' ? 'Tandai Dikemas' : 'Mark Packed'}</span>
@@ -1926,7 +2082,7 @@ export default function OutboundOrdersPage() {
                       <button
                         type="button"
                         onClick={() => openDispatchModal(selectedOrder)}
-                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl transition-colors flex items-center space-x-1.5"
+                        className="px-4 py-2 bg-[#0B3333] hover:bg-[#0B3333]/90 text-white text-xs font-medium rounded-xl transition-colors flex items-center space-x-1.5"
                       >
                         <Truck className="w-3.5 h-3.5" />
                         <span>{language === 'id' ? 'Kirim Pesanan' : 'Dispatch & Ship Order'}</span>
@@ -1998,7 +2154,7 @@ export default function OutboundOrdersPage() {
                   <select
                     value={dispatchCarrier}
                     onChange={(e) => setDispatchCarrier(e.target.value)}
-                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                   >
                     <option value="JNE">JNE Express</option>
                     <option value="SiCepat">SiCepat Express</option>
@@ -2023,7 +2179,7 @@ export default function OutboundOrdersPage() {
                       value={customCarrier}
                       onChange={(e) => setCustomCarrier(e.target.value)}
                       required
-                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     />
                   </div>
                 )}
@@ -2038,7 +2194,7 @@ export default function OutboundOrdersPage() {
                     value={dispatchTrackingNumber}
                     onChange={(e) => setDispatchTrackingNumber(e.target.value)}
                     required
-                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                   />
                 </div>
 
@@ -2051,7 +2207,7 @@ export default function OutboundOrdersPage() {
                     placeholder={language === 'id' ? 'Nama kurir, plat nomor kendaraan, atau catatan...' : 'Driver name, vehicle plate, or handoff notes...'}
                     value={dispatchNotes}
                     onChange={(e) => setDispatchNotes(e.target.value)}
-                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                   />
                 </div>
 
@@ -2059,14 +2215,14 @@ export default function OutboundOrdersPage() {
                   <button
                     type="button"
                     onClick={() => setShowDispatchModal(false)}
-                    className="px-5 py-2.5 text-sm font-semibold rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                    className="px-4 py-2 text-sm font-medium rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                   >
                     {language === 'id' ? 'Batal' : 'Cancel'}
                   </button>
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-[#7C6EF0] hover:bg-[#6C5CE7] text-white font-semibold text-sm transition-all shadow-sm shadow-[#7C6EF0]/20 cursor-pointer disabled:opacity-50"
+                    className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#0B3333] hover:bg-[#0B3333]/90 text-white font-medium text-sm transition-all shadow-sm cursor-pointer disabled:opacity-50"
                   >
                     {isSubmitting ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
@@ -2117,7 +2273,7 @@ export default function OutboundOrdersPage() {
                       value={custCode}
                       onChange={(e) => setCustCode(e.target.value)}
                       disabled={!!editingCustomer}
-                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors disabled:opacity-50"
+                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors disabled:opacity-50"
                     />
                   </div>
 
@@ -2130,7 +2286,7 @@ export default function OutboundOrdersPage() {
                       placeholder={language === 'id' ? 'cth. Jakarta, Surabaya...' : 'e.g. Jakarta, Surabaya...'}
                       value={custCity}
                       onChange={(e) => setCustCity(e.target.value)}
-                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     />
                   </div>
                 </div>
@@ -2145,7 +2301,7 @@ export default function OutboundOrdersPage() {
                     value={custName}
                     onChange={(e) => setCustName(e.target.value)}
                     required
-                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                   />
                 </div>
 
@@ -2159,7 +2315,7 @@ export default function OutboundOrdersPage() {
                       placeholder="orders@customer.com"
                       value={custEmail}
                       onChange={(e) => setCustEmail(e.target.value)}
-                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     />
                   </div>
 
@@ -2172,7 +2328,7 @@ export default function OutboundOrdersPage() {
                       placeholder="+62 812-xxxx-xxxx"
                       value={custPhone}
                       onChange={(e) => setCustPhone(e.target.value)}
-                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     />
                   </div>
                 </div>
@@ -2186,7 +2342,7 @@ export default function OutboundOrdersPage() {
                     placeholder={language === 'id' ? 'Alamat lengkap jalan...' : 'Full street address...'}
                     value={custAddress}
                     onChange={(e) => setCustAddress(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] resize-none transition-colors"
+                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] resize-none transition-colors"
                   />
                 </div>
 
@@ -2197,7 +2353,7 @@ export default function OutboundOrdersPage() {
                       id="custActive"
                       checked={custActive}
                       onChange={(e) => setCustActive(e.target.checked)}
-                      className="w-4 h-4 text-[#7C6EF0] rounded border-slate-300 focus:ring-[#7C6EF0]"
+                      className="w-4 h-4 text-[#0B3333] rounded border-slate-300 focus:ring-[#0B3333]"
                     />
                     <label
                       htmlFor="custActive"
@@ -2212,14 +2368,14 @@ export default function OutboundOrdersPage() {
                   <button
                     type="button"
                     onClick={() => setShowCustomerModal(false)}
-                    className="px-5 py-2.5 text-sm font-semibold rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                    className="px-4 py-2 text-sm font-medium rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                   >
                     {language === 'id' ? 'Batal' : 'Cancel'}
                   </button>
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-[#7C6EF0] hover:bg-[#6C5CE7] text-white font-semibold text-sm transition-all shadow-sm shadow-[#7C6EF0]/20 cursor-pointer disabled:opacity-50"
+                    className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#0B3333] hover:bg-[#0B3333]/90 text-white font-medium text-sm transition-all shadow-sm cursor-pointer disabled:opacity-50"
                   >
                     {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
                     <span>{editingCustomer ? (language === 'id' ? 'Perbarui Pelanggan' : 'Update Customer') : (language === 'id' ? 'Simpan Pelanggan' : 'Save Customer')}</span>

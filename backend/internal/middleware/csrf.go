@@ -56,8 +56,10 @@ func CSRFProtectionMiddleware(cfg *config.Config) gin.HandlerFunc {
 
 		// 1. Prohibit standard HTML form submissions on JSON APIs (common CSRF attack vector)
 		contentType := c.GetHeader("Content-Type")
-		if strings.HasPrefix(contentType, "application/x-www-form-urlencoded") {
-			utils.ErrorResponse(c, http.StatusUnsupportedMediaType, "Form URL-encoded content type is not supported. Use JSON.", nil)
+		if strings.HasPrefix(contentType, "application/x-www-form-urlencoded") ||
+			strings.HasPrefix(contentType, "multipart/form-data") ||
+			strings.HasPrefix(contentType, "text/plain") {
+			utils.ErrorResponse(c, http.StatusUnsupportedMediaType, "HTML form content types are not supported. Use application/json.", nil)
 			c.Abort()
 			return
 		}

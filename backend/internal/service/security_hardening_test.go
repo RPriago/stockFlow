@@ -124,3 +124,84 @@ func TestSecurity_UserEnumerationTimingDefense(t *testing.T) {
 			errNonExistent.Error(), errWrongPassword.Error())
 	}
 }
+
+func TestSecurity_BruteForceAccountLockout(t *testing.T) {
+	ctx := context.Background()
+	userRepo := repository.NewUserMemoryRepository()
+	cfg := &config.Config{
+		JWTSecret:      "test-secret-key-32-characters-min!!",
+		JWTExpiryHours: 24,
+	}
+	authSvc := NewAuthService(userRepo, cfg)
+
+	_, err := authSvc.Register(ctx, models.RegisterRequest{
+		Name:     "Target User",
+		Email:    "target@stockflow.test",
+		Password: "CorrectPassword123!",
+		Role:     models.RoleWarehouseStaff,
+	})
+	if err != nil {
+		t.Fatalf("failed to register user: %v", err)
+	}
+
+	// 4 failed attempts should not lock yet
+	for i := 1; i <= 4; i++ {
+		_, _, _, errLogin := authSvc.Login(ctx, models.LoginRequest{
+			Email:    "target@stockflow.test",
+			Password: "WrongPassword!",
+		})
+		if errLogin != ErrInvalidCredentials {
+			t.Fatalf("attempt %d: expected ErrInvalidCredentials, got %v", i, errLogin)
+		}
+	}
+
+	// 5th failed attempt triggers lockout
+	_, _, _, err5 := authSvc.Login(ctx, models.LoginRequest{
+		Email:    "target@stockflow.test",
+		Password: "WrongPassword!",
+	})
+	if err5 != ErrInvalidCredentials {
+		t.Fatalf("5th attempt: expected ErrInvalidCredentials, got %v", err5)
+	}
+
+	// 6th attempt (even with CORRECT password) must be rejected with ErrAccountLocked
+	_, _, _, errLocked := authSvc.Login(ctx, models.LoginRequest{
+		Email:    "target@stockflow.test",
+		Password: "CorrectPassword123!",
+	})
+	if errLocked != ErrAccountLocked {
+		t.Fatalf("expected ErrAccountLocked after 5 failures, got %v", errLocked)
+	}
+}
+
+func TestSecurity_InactiveUserEnumerationDefense(t *testing.T) {
+	ctx := context.Background()
+	userRepo := repository.NewUserMemoryRepository()
+	cfg := &config.Config{
+		JWTSecret:      "test-secret-key-32-characters-min!!",
+		JWTExpiryHours: 24,
+	}
+	authSvc := NewAuthService(userRepo, cfg)
+
+	// Seed inactive user
+	inactiveUser, err := authSvc.Register(ctx, models.RegisterRequest{
+		Name:     "Disabled Employee",
+		Email:    "disabled@stockflow.test",
+		Password: "Password123!",
+		Role:     models.RoleWarehouseStaff,
+	})
+	if err != nil {
+		t.Fatalf("failed to register user: %v", err)
+	}
+	inactiveUser.IsActive = false
+	_ = userRepo.Update(ctx, inactiveUser)
+
+	// Attempt login for inactive user
+	_, _, _, errInactive := authSvc.Login(ctx, models.LoginRequest{
+		Email:    "disabled@stockflow.test",
+		Password: "Password123!",
+	})
+	if errInactive != ErrAccountInactive {
+		t.Fatalf("expected ErrAccountInactive, got %v", errInactive)
+	}
+}

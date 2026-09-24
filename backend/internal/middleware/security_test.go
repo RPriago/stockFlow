@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,8 +10,12 @@ import (
 	"time"
 
 	"stockflow-backend/internal/config"
+	"stockflow-backend/internal/models"
+	"stockflow-backend/internal/repository"
+	"stockflow-backend/internal/utils"
 
 	"github.com/gin-gonic/gin"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 func init() {
@@ -182,5 +187,98 @@ func TestCSRFProtectionMiddleware(t *testing.T) {
 	router.ServeHTTP(wGood, reqGood)
 	if wGood.Code != http.StatusOK {
 		t.Fatalf("Legitimate request expected 200, got %d", wGood.Code)
+	}
+}
+
+func TestRateLimiter_SpoofedXForwardedFor(t *testing.T) {
+	limiter := NewRateLimiter(2, 500*time.Millisecond)
+	defer limiter.Close()
+
+	router := gin.New()
+	_ = router.SetTrustedProxies(nil) // SEC-001: Disallow proxy header trust
+	router.Use(limiter.Middleware())
+	router.GET("/protected-limit", func(c *gin.Context) {
+		c.String(http.StatusOK, "ok")
+	})
+
+	// Request 1 with spoofed IP
+	req1, _ := http.NewRequest(http.MethodGet, "/protected-limit", nil)
+	req1.Header.Set("X-Forwarded-For", "1.1.1.1")
+	w1 := httptest.NewRecorder()
+	router.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w1.Code)
+	}
+
+	// Request 2 with another spoofed IP
+	req2, _ := http.NewRequest(http.MethodGet, "/protected-limit", nil)
+	req2.Header.Set("X-Forwarded-For", "2.2.2.2")
+	w2 := httptest.NewRecorder()
+	router.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w2.Code)
+	}
+
+	// Request 3 with yet another spoofed IP - since SetTrustedProxies(nil) is in effect,
+	// Gin ignores X-Forwarded-For and identifies the client by RemoteAddr, triggering 429!
+	req3, _ := http.NewRequest(http.MethodGet, "/protected-limit", nil)
+	req3.Header.Set("X-Forwarded-For", "3.3.3.3")
+	w3 := httptest.NewRecorder()
+	router.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected rate limit 429 despite spoofed X-Forwarded-For, got %d", w3.Code)
+	}
+}
+
+func TestAuthMiddleware_DeactivatedUserRevocation(t *testing.T) {
+	cfg := &config.Config{
+		JWTSecret:      "test-secret-key-32-bytes-minimum!",
+		JWTExpiryHours: 1,
+	}
+
+	userRepo := repository.NewUserMemoryRepository()
+	ctx := context.Background()
+
+	user := &models.User{
+		ID:           primitive.NewObjectID(),
+		Name:         "Revoked Employee",
+		Email:        "revoked@stockflow.test",
+		PasswordHash: "dummyhash",
+		Role:         models.RoleWarehouseStaff,
+		IsActive:     true,
+	}
+	_ = userRepo.Create(ctx, user)
+
+	token, _, err := utils.GenerateJWT(user, cfg.JWTSecret, cfg.JWTExpiryHours)
+	if err != nil {
+		t.Fatalf("failed to generate token: %v", err)
+	}
+
+	router := gin.New()
+	router.Use(AuthMiddleware(cfg, userRepo))
+	router.GET("/protected-op", func(c *gin.Context) {
+		c.String(http.StatusOK, "ok")
+	})
+
+	// 1. Initial request with active user succeeds
+	req1, _ := http.NewRequest(http.MethodGet, "/protected-op", nil)
+	req1.Header.Set("Authorization", "Bearer "+token)
+	w1 := httptest.NewRecorder()
+	router.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusOK {
+		t.Fatalf("expected 200 for active user, got %d", w1.Code)
+	}
+
+	// 2. Admin deactivates user
+	user.IsActive = false
+	_ = userRepo.Update(ctx, user)
+
+	// 3. Subsequent request with the same token is revoked immediately
+	req2, _ := http.NewRequest(http.MethodGet, "/protected-op", nil)
+	req2.Header.Set("Authorization", "Bearer "+token)
+	w2 := httptest.NewRecorder()
+	router.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for deactivated user, got %d", w2.Code)
 	}
 }

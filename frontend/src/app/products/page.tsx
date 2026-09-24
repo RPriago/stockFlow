@@ -1,32 +1,31 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import FloatingToast from '@/components/FloatingToast';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
-import { Product, Category, ProductListResult, ProductVariant } from '@/types/product';
-import { api, ApiError } from '@/lib/api';
+import { Product, Category, ProductListResult } from '@/types/product';
+import { InventoryStats } from '@/types/inventory';
+import { api } from '@/lib/api';
 import {
   Package,
   Plus,
   Search,
-  Barcode,
   FolderPlus,
-  Layers,
   Edit2,
   Trash2,
-  AlertTriangle,
-  CheckCircle2,
   X,
   Loader2,
   Sparkles,
-  Tag,
-  DollarSign,
-  Image as ImageIcon,
-  ExternalLink,
   ChevronDown,
   ChevronUp,
+  Upload,
+  SlidersHorizontal,
+  LayoutGrid,
+  List,
+  ArrowUpRight,
+  ArrowDownRight,
 } from 'lucide-react';
 
 const STANDARD_UNITS = ['pcs', 'box', 'kg', 'pair', 'bundle', 'meter', 'liter', 'carton', 'roll'];
@@ -42,10 +41,20 @@ export default function ProductsPage() {
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [totalCount, setTotalCount] = useState(0);
+  const [invStats, setInvStats] = useState<InventoryStats | null>(null);
+  const [currentTime, setCurrentTime] = useState<number>(0);
+
+  // Reference mockup UI states
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'archived'>('all');
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
 
   // Notifications
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // Responsive KPI metrics collapse state
+  const [showAllMetrics, setShowAllMetrics] = useState(false);
 
   // Modals
   const [showProductModal, setShowProductModal] = useState(false);
@@ -83,10 +92,21 @@ export default function ProductsPage() {
       const res = await api.get<Category[]>('/categories');
       if (res.success && res.data) {
         setCategories(res.data);
-        setCategories(res.data || []);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to fetch categories:', err);
+    }
+  }, []);
+
+  // Fetch Inventory Stats
+  const fetchInventoryStats = useCallback(async () => {
+    try {
+      const res = await api.get<InventoryStats>('/inventory/stats');
+      if (res.success && res.data) {
+        setInvStats(res.data);
+      }
+    } catch {
+      // Fallback gracefully to local calculation
     }
   }, []);
 
@@ -95,27 +115,157 @@ export default function ProductsPage() {
     setIsLoading(true);
     setErrorMsg(null);
     try {
-      let query = `/products?page=1&limit=50`;
+      let query = `/products?page=1&limit=100&include_deleted=true`;
       if (search) query += `&search=${encodeURIComponent(search)}`;
       if (selectedCategory) query += `&category_id=${encodeURIComponent(selectedCategory)}`;
 
       const res = await api.get<ProductListResult>(query);
       if (res.success && res.data) {
-        setProducts(res.data.products);
-        setTotalCount(res.data.meta.total);
         setProducts(res.data.products || []);
         setTotalCount(res.data.meta?.total || 0);
+        setCurrentTime(Date.now());
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to load product catalog');
+    } catch (err: unknown) {
+      setErrorMsg((err as Error).message || 'Failed to load product catalog');
     } finally {
       setIsLoading(false);
     }
   }, [search, selectedCategory]);
 
+  // Filter products by status (All, Active, Archived)
+  const filteredProducts = useMemo(() => {
+    if (!products) return [];
+    if (statusFilter === 'active') {
+      return products.filter((p) => !p.is_deleted);
+    }
+    if (statusFilter === 'archived') {
+      return products.filter((p) => p.is_deleted);
+    }
+    return products;
+  }, [products, statusFilter]);
+
+  // Precise 7-day metric calculations (rounded to 1 decimal place)
+  const { prodMetrics, valMetrics, catMetrics, lowStockMetrics } = useMemo(() => {
+    const now = currentTime || 0;
+    const sevenDaysAgo = now > 0 ? now - 7 * 24 * 60 * 60 * 1000 : 0;
+
+    // Active products
+    const activeProducts = products.filter((p) => !p.is_deleted);
+    const totalActive = activeProducts.length;
+
+    // Products created in the last 7 days
+    const recentProducts = activeProducts.filter((p) => {
+      if (sevenDaysAgo === 0) return false;
+      return new Date(p.created_at).getTime() >= sevenDaysAgo;
+    });
+    const baselineProductsCount = totalActive - recentProducts.length;
+
+    let prodChange = '+0.0%';
+    let prodIsPositive = true;
+    if (baselineProductsCount > 0) {
+      const pct = (recentProducts.length / baselineProductsCount) * 100;
+      prodChange = `+${pct.toFixed(1)}%`;
+      prodIsPositive = true;
+    } else if (totalActive > 0) {
+      prodChange = '+100.0%';
+      prodIsPositive = true;
+    } else {
+      prodChange = '+0.0%';
+      prodIsPositive = true;
+    }
+
+    // Catalog Value (sum of active product prices)
+    const currentTotalValue = activeProducts.reduce(
+      (acc, p) => acc + (Number(p.price) || 0),
+      0
+    );
+    const recentProductsValue = recentProducts.reduce(
+      (acc, p) => acc + (Number(p.price) || 0),
+      0
+    );
+    const baselineValue = currentTotalValue - recentProductsValue;
+
+    let valChange = '+0.0%';
+    let valIsPositive = true;
+    if (baselineValue > 0) {
+      const pct = (recentProductsValue / baselineValue) * 100;
+      valChange = `+${pct.toFixed(1)}%`;
+      valIsPositive = true;
+    } else if (currentTotalValue > 0) {
+      valChange = '+100.0%';
+      valIsPositive = true;
+    } else {
+      valChange = '+0.0%';
+      valIsPositive = true;
+    }
+
+    // Categories created in the last 7 days
+    const recentCategories = categories.filter((c) => {
+      if (sevenDaysAgo === 0) return false;
+      return new Date(c.created_at).getTime() >= sevenDaysAgo;
+    });
+    const baselineCatCount = categories.length - recentCategories.length;
+
+    let catChange = '+0.0%';
+    let catIsPositive = true;
+    if (baselineCatCount > 0) {
+      const pct = (recentCategories.length / baselineCatCount) * 100;
+      catChange = `+${pct.toFixed(1)}%`;
+      catIsPositive = true;
+    } else if (categories.length > 0) {
+      catChange = '+100.0%';
+      catIsPositive = true;
+    } else {
+      catChange = '+0.0%';
+      catIsPositive = true;
+    }
+
+    // Low Stock Items
+    const currentLowStock = invStats
+      ? invStats.low_stock_items_count
+      : activeProducts.filter((p) => (p.min_stock || 0) > 0).length;
+
+    const recentLowStock = recentProducts.filter((p) => (p.min_stock || 0) > 0).length;
+    const baselineLowStock = Math.max(currentLowStock - recentLowStock, 0);
+
+    let lowStockChange = '+0.0%';
+    let lowStockIsPositive = true;
+    if (baselineLowStock > 0) {
+      const diff = currentLowStock - baselineLowStock;
+      const pct = (diff / baselineLowStock) * 100;
+      if (diff > 0) {
+        lowStockChange = `+${pct.toFixed(1)}%`;
+        lowStockIsPositive = false;
+      } else if (diff < 0) {
+        lowStockChange = `${pct.toFixed(1)}%`;
+        lowStockIsPositive = true;
+      } else {
+        lowStockChange = '+0.0%';
+        lowStockIsPositive = true;
+      }
+    } else if (currentLowStock > 0) {
+      lowStockChange = '+100.0%';
+      lowStockIsPositive = false;
+    } else {
+      lowStockChange = '+0.0%';
+      lowStockIsPositive = true;
+    }
+
+    return {
+      prodMetrics: { total: totalCount || totalActive, change: prodChange, isPositive: prodIsPositive },
+      valMetrics: { total: currentTotalValue, change: valChange, isPositive: valIsPositive },
+      catMetrics: { total: categories.length, change: catChange, isPositive: catIsPositive },
+      lowStockMetrics: { total: currentLowStock, change: lowStockChange, isPositive: lowStockIsPositive },
+    };
+  }, [products, categories, invStats, currentTime, totalCount]);
+
   useEffect(() => {
-    fetchCategories();
-  }, [fetchCategories]);
+    const timer = setTimeout(() => {
+      fetchCategories();
+      fetchInventoryStats();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [fetchCategories, fetchInventoryStats]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -128,22 +278,29 @@ export default function ProductsPage() {
     if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
       const q = urlParams.get('search');
-      if (q) setSearch(q);
+      let timer: NodeJS.Timeout | null = null;
+      if (q) {
+        timer = setTimeout(() => setSearch(q), 0);
+      }
 
-      const handleAppSearch = (e: any) => {
-        if (typeof e.detail === 'string') {
-          setSearch(e.detail);
+      const handleAppSearch = (e: Event) => {
+        const detail = (e as CustomEvent).detail;
+        if (typeof detail === 'string') {
+          setSearch(detail);
         }
       };
       window.addEventListener('app:search', handleAppSearch);
-      return () => window.removeEventListener('app:search', handleAppSearch);
+      return () => {
+        if (timer) clearTimeout(timer);
+        window.removeEventListener('app:search', handleAppSearch);
+      };
     }
   }, []);
 
   // Real-time auto-refresh across browsers
   useEffect(() => {
-    const handleSync = (e: any) => {
-      const resource = e?.detail?.resource;
+    const handleSync = (e: Event) => {
+      const resource = (e as CustomEvent)?.detail?.resource;
       if (!resource || resource === 'products' || resource === 'categories') {
         fetchProducts();
         if (resource === 'categories') {
@@ -312,8 +469,8 @@ export default function ProductsPage() {
       }
       setShowProductModal(false);
       fetchProducts();
-    } catch (err: any) {
-      setFormError(err.message || 'Operation failed');
+    } catch (err: unknown) {
+      setFormError((err as Error).message || 'Operation failed');
     } finally {
       setIsSubmitting(false);
     }
@@ -332,8 +489,8 @@ export default function ProductsPage() {
       setCatName('');
       setCatDesc('');
       await fetchCategories();
-    } catch (err: any) {
-      setCatError(err.message || 'Failed to create category');
+    } catch (err: unknown) {
+      setCatError((err as Error).message || 'Failed to create category');
     } finally {
       setIsCatSubmitting(false);
     }
@@ -349,8 +506,8 @@ export default function ProductsPage() {
       setShowDeleteModal(false);
       setSelectedProduct(null);
       fetchProducts();
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to delete product');
+    } catch (err: unknown) {
+      setErrorMsg((err as Error).message || 'Failed to delete product');
     } finally {
       setIsSubmitting(false);
     }
@@ -362,38 +519,51 @@ export default function ProductsPage() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2.5">
-              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#1B1B1F] dark:text-white">
-                {t('productsTitle')}
-              </h1>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#F4F3FF] text-[#6C5CE7] dark:bg-[#7C6EF0]/15 dark:text-[#A594FD] border border-[#E0DCFC] dark:border-[#7C6EF0]/30">
-                {totalCount} {t('items')}
-              </span>
-            </div>
-            <p className="text-sm text-[#8B8B99] dark:text-slate-400 mt-1">
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-white">
+              {t('productsTitle')}
+            </h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
               {t('productsSubtitle')}
             </p>
           </div>
 
-          {canManage && (
-            <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
-              <button
-                onClick={() => setShowCategoryModal(true)}
-                className="inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-full border border-[#EEEDF5] dark:border-slate-700 bg-white dark:bg-slate-800 text-xs sm:text-sm font-semibold text-[#1B1B1F] dark:text-white hover:border-[#7C6EF0] hover:text-[#7C6EF0] transition-colors shadow-xs cursor-pointer"
-              >
-                <FolderPlus className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[1.8] text-[#8B8B99] dark:text-slate-400" />
-                <span>{t('addCategory')}</span>
-              </button>
+          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+            <button
+              onClick={() => {
+                const csvData = (products || []).map(p => `${p.name},${p.sku},${p.price},${p.min_stock}`).join('\n');
+                const blob = new Blob([`Name,SKU,Price,Stock\n${csvData}`], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'stockflow-products.csv';
+                a.click();
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors shadow-xs cursor-pointer"
+            >
+              <Upload className="w-3.5 h-3.5 stroke-[2]" />
+              <span>Export</span>
+            </button>
 
-              <button
-                onClick={handleOpenAddModal}
-                className="inline-flex items-center gap-1.5 sm:gap-2 px-3.5 sm:px-4 py-2 rounded-full bg-[#7C6EF0] text-white text-xs sm:text-sm font-semibold hover:bg-[#6C5CE7] transition-all shadow-sm shadow-[#7C6EF0]/20 cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" />
-                <span>{t('addProduct')}</span>
-              </button>
-            </div>
-          )}
+            {canManage && (
+              <>
+                <button
+                  onClick={() => setShowCategoryModal(true)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors shadow-xs cursor-pointer"
+                >
+                  <FolderPlus className="w-3.5 h-3.5 stroke-[2] text-slate-400" />
+                  <span>{t('addCategory')}</span>
+                </button>
+
+                <button
+                  onClick={handleOpenAddModal}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#0B3333] hover:bg-[#0B3333]/90 text-white text-xs sm:text-sm font-semibold transition-colors shadow-xs cursor-pointer"
+                >
+                  <Plus className="w-4 h-4 stroke-[2.5]" />
+                  <span>{t('addProduct')}</span>
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Floating Notifications */}
@@ -408,102 +578,468 @@ export default function ProductsPage() {
           onClose={() => setErrorMsg(null)}
         />
 
-        {/* Filter Toolbar */}
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col md:flex-row gap-4 justify-between items-stretch md:items-center">
-          {/* Search bar */}
-          <div className="relative flex-1">
-            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-              <Search className="w-4 h-4" />
+        {/* 4 Top KPI Stat Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Card 1: TOTAL PRODUCTS (Core Metric) */}
+          <div className={`bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-col justify-between ${
+            !showAllMetrics ? 'sm:col-span-2 lg:col-span-1' : ''
+          }`}>
+            <div>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                {language === 'id' ? 'TOTAL PRODUK' : 'TOTAL PRODUCTS'}
+              </span>
             </div>
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={t('searchProductsPlaceholder')}
-              className="w-full pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800/60 border border-slate-300 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
+            <div className="mt-3">
+              <p className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white tabular-nums font-sans">
+                {prodMetrics.total.toLocaleString('id-ID')}
+              </p>
+              <div className="flex items-center gap-1.5 mt-2">
+                <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold ${
+                  prodMetrics.isPositive
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
+                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
+                }`}>
+                  {prodMetrics.isPositive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                  {prodMetrics.change}
+                </span>
+                <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                  {language === 'id' ? '7 hari terakhir' : 'Last 7 days'}
+                </span>
+              </div>
+            </div>
           </div>
 
-          {/* Category Filter Pills */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0">
-            <button
-              onClick={() => setSelectedCategory('')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
-                !selectedCategory
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-              }`}
-            >
-              {t('allCategories')}
-            </button>
-            {(categories || []).map((c) => (
-              <button
-                key={c.id}
-                onClick={() => setSelectedCategory(c.id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
-                  selectedCategory === c.id
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-                }`}
-              >
-                {c.name}
-              </button>
-            ))}
+          {/* Card 2: TOTAL CATALOG VALUE */}
+          <div className={`bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-col justify-between ${
+            !showAllMetrics ? 'hidden lg:flex' : 'flex'
+          }`}>
+            <div>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                {language === 'id' ? 'NILAI KATALOG' : 'TOTAL CATALOG VALUE'}
+              </span>
+            </div>
+            <div className="mt-3">
+              <p className="text-xl sm:text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white truncate tabular-nums font-sans">
+                Rp {valMetrics.total.toLocaleString('id-ID')}
+              </p>
+              <div className="flex items-center gap-1.5 mt-2">
+                <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold ${
+                  valMetrics.isPositive
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
+                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
+                }`}>
+                  {valMetrics.isPositive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                  {valMetrics.change}
+                </span>
+                <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                  {language === 'id' ? '7 hari terakhir' : 'Last 7 days'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Card 3: TOTAL CATEGORIES */}
+          <div className={`bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-col justify-between ${
+            !showAllMetrics ? 'hidden lg:flex' : 'flex'
+          }`}>
+            <div>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                {language === 'id' ? 'TOTAL KATEGORI' : 'TOTAL CATEGORIES'}
+              </span>
+            </div>
+            <div className="mt-3">
+              <p className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white tabular-nums font-sans">
+                {catMetrics.total.toLocaleString('id-ID')}
+              </p>
+              <div className="flex items-center gap-1.5 mt-2">
+                <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold ${
+                  catMetrics.isPositive
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
+                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
+                }`}>
+                  {catMetrics.isPositive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                  {catMetrics.change}
+                </span>
+                <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                  {language === 'id' ? '7 hari terakhir' : 'Last 7 days'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Card 4: SAFETY STOCK ALERTS */}
+          <div className={`bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-col justify-between ${
+            !showAllMetrics ? 'hidden lg:flex' : 'flex'
+          }`}>
+            <div>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                {language === 'id' ? 'PERINGATAN STOK' : 'LOW STOCK ALERTS'}
+              </span>
+            </div>
+            <div className="mt-3">
+              <p className={`text-2xl sm:text-3xl font-extrabold tracking-tight tabular-nums font-sans ${
+                lowStockMetrics.total > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-white'
+              }`}>
+                {lowStockMetrics.total.toLocaleString('id-ID')}
+              </p>
+              <div className="flex items-center gap-1.5 mt-2">
+                <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold ${
+                  lowStockMetrics.isPositive
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
+                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
+                }`}>
+                  {lowStockMetrics.isPositive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                  {lowStockMetrics.change}
+                </span>
+                <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                  {language === 'id' ? '7 hari terakhir' : 'Last 7 days'}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Product Table */}
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
+        {/* Responsive Toggle for Metric Cards */}
+        <div className="lg:hidden">
+          <button
+            type="button"
+            onClick={() => setShowAllMetrics((prev) => !prev)}
+            aria-expanded={showAllMetrics}
+            className="w-full py-2.5 px-4 rounded-xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60 shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            <span>
+              {showAllMetrics
+                ? (language === 'id' ? 'Sembunyikan metrik' : 'Show less metrics')
+                : (language === 'id' ? 'Lihat 3 metrik lainnya' : 'Show 3 more metrics')}
+            </span>
+            {showAllMetrics ? (
+              <ChevronUp className="w-3.5 h-3.5 stroke-[2]" />
+            ) : (
+              <ChevronDown className="w-3.5 h-3.5 stroke-[2]" />
+            )}
+          </button>
+        </div>
+
+        {/* Table Container Card */}
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 overflow-hidden shadow-xs">
+          {/* Table Controls Toolbar */}
+          <div className="p-4 border-b border-slate-200/80 dark:border-slate-800 flex flex-col lg:flex-row gap-3.5 justify-between items-stretch lg:items-center">
+            {/* Left Controls: Search, Filter, View Mode */}
+            <div className="flex flex-wrap items-center gap-2.5 flex-1 max-w-xl">
+              <div className="relative flex-1 min-w-[220px]">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                  <Search className="w-4 h-4" />
+                </div>
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search by product name or ID"
+                  className="w-full pl-9 pr-4 py-2 bg-slate-50/70 dark:bg-slate-800/60 border border-slate-200/90 dark:border-slate-700/80 rounded-xl text-xs sm:text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333]"
+                />
+              </div>
+
+              <div className="relative">
+                <select
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  className="inline-flex items-center gap-1.5 pl-3 pr-8 py-2 rounded-xl border border-slate-200/90 dark:border-slate-700/80 bg-white dark:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors cursor-pointer appearance-none"
+                >
+                  <option value="">Filter Category</option>
+                  {(categories || []).map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                <SlidersHorizontal className="w-3.5 h-3.5 text-slate-500 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              </div>
+
+              <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl border border-slate-200/80 dark:border-slate-700/60">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('grid')}
+                  className={`p-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
+                    viewMode === 'grid'
+                      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                      : 'text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                  }`}
+                  title="Grid view"
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('list')}
+                  className={`p-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
+                    viewMode === 'list'
+                      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                      : 'text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                  }`}
+                  title="List view"
+                >
+                  <List className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Right Status Tabs */}
+            <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl self-start lg:self-auto overflow-x-auto">
+              {([
+                { id: 'all', label: language === 'id' ? 'Semua' : 'All' },
+                { id: 'active', label: language === 'id' ? 'Aktif' : 'Active' },
+                { id: 'archived', label: language === 'id' ? 'Diarsipkan' : 'Archived' },
+              ] as const).map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setStatusFilter(tab.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                    statusFilter === tab.id
+                      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Content: Loading / Empty / Grid or List */}
           {isLoading ? (
             <div className="py-20 flex flex-col items-center justify-center text-slate-500">
-              <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mb-2" />
-              <p className="text-sm">{t('loading')}</p>
+              <Loader2 className="w-8 h-8 animate-spin text-[#0B3333] dark:text-emerald-400 mb-2" />
+              <p className="text-xs font-medium">{t('loading')}</p>
             </div>
-          ) : (!products || products.length === 0) ? (
+          ) : (!filteredProducts || filteredProducts.length === 0) ? (
             <div className="py-20 text-center text-slate-500">
               <Package className="w-12 h-12 mx-auto mb-3 text-slate-300 dark:text-slate-700" />
               <p className="text-base font-semibold text-slate-800 dark:text-slate-200">{t('noProductsFound')}</p>
               <p className="text-xs text-slate-500 mt-1">
-                {search || selectedCategory
-                  ? (language === 'id' ? 'Coba sesuaikan pencarian atau filter kategori.' : 'Try adjusting your search query or filter.')
+                {search || selectedCategory || statusFilter !== 'all'
+                  ? (language === 'id' ? 'Coba sesuaikan pencarian atau filter status/kategori.' : 'Try adjusting your search query or status/category filter.')
                   : t('noProductsSubtitle')}
               </p>
             </div>
+          ) : viewMode === 'grid' ? (
+            /* GRID VIEW */
+            <div className="p-4 sm:p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {filteredProducts.map((p) => {
+                const isSelected = selectedIds.includes(p.id);
+                const isExpanded = expandedProductId === p.id;
+                const hasVariants = p.variants && p.variants.length > 0;
+
+                return (
+                  <div
+                    key={p.id}
+                    className={`bg-white dark:bg-slate-900 rounded-xl border transition-all duration-150 flex flex-col justify-between overflow-hidden shadow-2xs hover:shadow-xs ${
+                      isSelected
+                        ? 'border-[#0B3333] dark:border-[#2dd4bf] ring-1 ring-[#0B3333]/20 dark:ring-[#2dd4bf]/20'
+                        : 'border-slate-200/90 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                    }`}
+                  >
+                    {/* Card Top: Checkbox, Status Badge */}
+                    <div className="p-4 pb-0">
+                      <div className="flex items-center justify-between mb-3">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => {
+                            setSelectedIds((prev) =>
+                              prev.includes(p.id) ? prev.filter((id) => id !== p.id) : [...prev, p.id]
+                            );
+                          }}
+                          className="rounded border-slate-300 text-[#0B3333] focus:ring-[#0B3333]/20 cursor-pointer"
+                        />
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold border ${
+                            p.is_deleted
+                              ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+                              : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border-emerald-200/80 dark:border-emerald-800/40'
+                          }`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              p.is_deleted ? 'bg-slate-400' : 'bg-emerald-500'
+                            }`}
+                          />
+                          {p.is_deleted
+                            ? language === 'id'
+                              ? 'Diarsipkan'
+                              : 'Archived'
+                            : language === 'id'
+                            ? 'Aktif'
+                            : 'Active'}
+                        </span>
+                      </div>
+
+                      {/* Product Thumbnail & Identity */}
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 flex-shrink-0 flex items-center justify-center overflow-hidden border border-slate-200/80 dark:border-slate-700/60">
+                          {p.image_url ? (
+                            /* eslint-disable-next-line @next/next/no-img-element */
+                            <img
+                              src={p.image_url}
+                              alt={p.name}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                (e.currentTarget as HTMLElement).style.display = 'none';
+                              }}
+                            />
+                          ) : (
+                            <Package className="w-6 h-6 text-slate-400" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-sm text-slate-900 dark:text-white truncate">
+                            {p.name}
+                          </p>
+                          <p className="text-xs text-slate-400 dark:text-slate-500 truncate mt-0.5">
+                            {p.category_name || 'General Product'} • <span className="font-mono text-[11px]">#{p.sku || p.id.slice(0, 8).toUpperCase()}</span>
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Card Middle: Price, Min Stock, Variants info */}
+                    <div className="p-4 space-y-2 text-xs border-t border-slate-100 dark:border-slate-800/80 mt-3 bg-slate-50/40 dark:bg-slate-800/20">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 dark:text-slate-500">{language === 'id' ? 'Harga Jual' : 'Selling Price'}</span>
+                        <span className="font-bold text-slate-900 dark:text-white tabular-nums font-sans">
+                          Rp {p.price.toLocaleString('id-ID')}
+                        </span>
+                      </div>
+                      {p.cost_price ? (
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400 dark:text-slate-500">{language === 'id' ? 'Modal' : 'Cost'}</span>
+                          <span className="text-slate-600 dark:text-slate-400 tabular-nums font-sans">
+                            Rp {p.cost_price.toLocaleString('id-ID')}
+                          </span>
+                        </div>
+                      ) : null}
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 dark:text-slate-500">{language === 'id' ? 'Stok Minimum' : 'Safety Min'}</span>
+                        <span className="font-semibold text-slate-700 dark:text-slate-300 tabular-nums font-sans">
+                          {p.min_stock.toLocaleString('id-ID')} {p.unit || 'pcs'}
+                        </span>
+                      </div>
+
+                      {hasVariants && (
+                        <div className="pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setExpandedProductId(isExpanded ? null : p.id)}
+                            className="w-full flex items-center justify-between text-[11px] font-semibold text-[#0B3333] dark:text-[#2dd4bf] hover:underline cursor-pointer"
+                          >
+                            <span>{p.variants.length} {language === 'id' ? 'Varian Produk' : 'Variants'}</span>
+                            {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                          </button>
+                          {isExpanded && (
+                            <div className="mt-2 space-y-1.5 p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800">
+                              {p.variants.map((v, i) => (
+                                <div key={i} className="text-[11px] flex justify-between items-center text-slate-600 dark:text-slate-300">
+                                  <span className="truncate max-w-[120px]">{v.name}</span>
+                                  <span className="font-mono text-[10px] text-slate-400">{v.sku}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Card Bottom Actions */}
+                    {canManage && (
+                      <div className="p-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-1.5 bg-white dark:bg-slate-900">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditModal(p)}
+                          className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                          title="Edit product"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedProduct(p);
+                            setShowDeleteModal(true);
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer"
+                          title="Delete product"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           ) : (
-            <div className="overflow-x-auto overflow-y-auto max-h-[500px]">
+            /* LIST (TABLE) VIEW */
+            <div className="overflow-x-auto">
               <table className="w-full text-left text-sm text-slate-600 dark:text-slate-300">
-                <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-900 [&>tr>th]:bg-slate-50 dark:[&>tr>th]:bg-slate-900 text-xs uppercase font-semibold text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800 shadow-xs">
+                <thead className="bg-slate-50/60 dark:bg-slate-900 text-[11px] uppercase font-bold tracking-wider text-slate-400 dark:text-slate-500 border-b border-slate-200/80 dark:border-slate-800">
                   <tr>
-                    <th className="px-6 py-3.5">{t('colProduct')}</th>
-                    <th className="px-6 py-3.5">{t('colSkuBarcode')}</th>
-                    <th className="px-6 py-3.5">{t('colCategory')}</th>
-                    <th className="px-6 py-3.5">{t('colUnit')}</th>
-                    <th className="px-6 py-3.5">{t('colPrice')}</th>
-                    <th className="px-6 py-3.5">{t('colMinStock')}</th>
-                    <th className="px-6 py-3.5">{t('colVariants')}</th>
-                    {canManage && <th className="px-6 py-3.5 text-right">{t('actions')}</th>}
+                    <th className="w-12 px-4 py-3.5">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.length > 0 && selectedIds.length === filteredProducts.length}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedIds(filteredProducts.map((p) => p.id));
+                          } else {
+                            setSelectedIds([]);
+                          }
+                        }}
+                        className="rounded border-slate-300 text-[#0B3333] focus:ring-[#0B3333]/20 cursor-pointer"
+                      />
+                    </th>
+                    <th className="px-4 py-3.5">{language === 'id' ? 'PRODUK' : 'PRODUCT NAME'}</th>
+                    <th className="px-4 py-3.5">{language === 'id' ? 'SKU & TANGGAL' : 'SKU & DATE'}</th>
+                    <th className="px-4 py-3.5">{language === 'id' ? 'HARGA' : 'PRICE'}</th>
+                    <th className="px-4 py-3.5">{language === 'id' ? 'STOK MIN' : 'MIN STOCK'}</th>
+                    <th className="px-4 py-3.5">{language === 'id' ? 'STATUS' : 'STATUS'}</th>
+                    {canManage && <th className="px-4 py-3.5 text-right">{language === 'id' ? 'AKSI' : 'ACTIONS'}</th>}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                  {(products || []).map((p) => {
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+                  {filteredProducts.map((p) => {
                     const isExpanded = expandedProductId === p.id;
                     const hasVariants = p.variants && p.variants.length > 0;
+                    const isSelected = selectedIds.includes(p.id);
 
                     return (
                       <React.Fragment key={p.id}>
-                        <tr className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors">
-                          {/* Image & Name */}
-                          <td className="px-6 py-4">
+                        <tr className={`hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition-colors ${isSelected ? 'bg-slate-50/90 dark:bg-slate-800/60' : ''}`}>
+                          {/* Row Checkbox */}
+                          <td className="px-4 py-4">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => {
+                                setSelectedIds((prev) =>
+                                  prev.includes(p.id) ? prev.filter((id) => id !== p.id) : [...prev, p.id]
+                                );
+                              }}
+                              className="rounded border-slate-300 text-[#0B3333] focus:ring-[#0B3333]/20 cursor-pointer"
+                            />
+                          </td>
+
+                          {/* PRODUCT NAME */}
+                          <td className="px-4 py-4">
                             <div className="flex items-center gap-3">
-                              <div className="w-11 h-11 rounded-xl bg-slate-100 dark:bg-slate-800 flex-shrink-0 flex items-center justify-center overflow-hidden border border-slate-200 dark:border-slate-700">
+                              <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex-shrink-0 flex items-center justify-center overflow-hidden border border-slate-200/80 dark:border-slate-700/60">
                                 {p.image_url ? (
+                                  /* eslint-disable-next-line @next/next/no-img-element */
                                   <img
                                     src={p.image_url}
                                     alt={p.name}
                                     className="w-full h-full object-cover"
                                     onError={(e) => {
-                                      // Fallback on broken image
-                                      (e.target as any).style.display = 'none';
+                                      (e.currentTarget as HTMLElement).style.display = 'none';
                                     }}
                                   />
                                 ) : (
@@ -511,106 +1047,96 @@ export default function ProductsPage() {
                                 )}
                               </div>
                               <div>
-                                <p className="font-semibold text-slate-900 dark:text-white leading-tight">
+                                <p className="font-semibold text-sm text-slate-900 dark:text-white leading-tight">
                                   {p.name}
                                 </p>
-                                {p.description && (
-                                  <p className="text-xs text-slate-400 line-clamp-1 mt-0.5 max-w-xs">
-                                    {p.description}
-                                  </p>
-                                )}
+                                <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+                                  {p.category_name || 'General Product'} • {p.sku}
+                                </p>
                               </div>
                             </div>
                           </td>
 
-                          {/* SKU & Barcode */}
-                          <td className="px-6 py-4">
-                            <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
-                              {p.sku}
-                            </span>
-                            {p.barcode && (
-                              <div className="flex items-center gap-1 text-[11px] text-slate-400 font-mono mt-1">
-                                <Barcode className="w-3.5 h-3.5" />
-                                <span>{p.barcode}</span>
-                              </div>
-                            )}
+                          {/* ID & CREATE DATE */}
+                          <td className="px-4 py-4">
+                            <p className="font-mono text-xs font-semibold text-slate-900 dark:text-white">
+                              #{p.sku || p.id.slice(0, 8).toUpperCase()}
+                            </p>
+                            <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">
+                              {p.created_at ? new Date(p.created_at).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '—'}
+                            </p>
                           </td>
 
-                          {/* Category */}
-                          <td className="px-6 py-4">
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 border border-indigo-200/50 dark:border-indigo-800/30">
-                              {p.category_name || 'General'}
-                            </span>
-                          </td>
-
-                          {/* Unit */}
-                          <td className="px-6 py-4">
-                            <span className="uppercase text-xs font-semibold text-slate-500">
-                              {p.unit}
-                            </span>
-                          </td>
-
-                          {/* Price */}
-                          <td className="px-6 py-4">
-                            <p className="font-semibold text-slate-900 dark:text-slate-100 text-xs">
+                          {/* PRICE */}
+                          <td className="px-4 py-4">
+                            <p className="text-xs font-bold tabular-nums font-sans text-slate-900 dark:text-white">
                               Rp {p.price.toLocaleString('id-ID')}
                             </p>
-                            {p.cost_price > 0 && (
-                              <p className="text-[10px] text-slate-400">
-                                Cost: Rp {p.cost_price.toLocaleString('id-ID')}
-                              </p>
-                            )}
+                            <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">
+                              {p.cost_price ? `${language === 'id' ? 'Modal' : 'Cost'}: Rp ${p.cost_price.toLocaleString('id-ID')}` : '—'}
+                            </p>
                           </td>
 
-                          {/* Min Stock */}
-                          <td className="px-6 py-4">
-                            <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded border border-amber-200/60 dark:border-amber-900/40">
-                              <AlertTriangle className="w-3 h-3" />
-                              Min: {p.min_stock} {p.unit}
+                          {/* MIN STOCK */}
+                          <td className="px-4 py-4">
+                            <span className="text-xs font-bold tabular-nums font-sans text-slate-900 dark:text-white">
+                              {p.min_stock.toLocaleString('id-ID')} {p.unit || 'pcs'}
                             </span>
                           </td>
 
-                          {/* Variants Count & Toggle */}
-                          <td className="px-6 py-4">
-                            {hasVariants ? (
-                              <button
-                                onClick={() =>
-                                  setExpandedProductId(isExpanded ? null : p.id)
-                                }
-                                className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline"
-                              >
-                                <span>{p.variants.length} Variants</span>
-                                {isExpanded ? (
-                                  <ChevronUp className="w-3.5 h-3.5" />
-                                ) : (
-                                  <ChevronDown className="w-3.5 h-3.5" />
-                                )}
-                              </button>
-                            ) : (
-                              <span className="text-xs text-slate-400">No variants</span>
-                            )}
+                          {/* STATUS */}
+                          <td className="px-4 py-4">
+                            <span
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${
+                                p.is_deleted
+                                  ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+                                  : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border-emerald-200/80 dark:border-emerald-800/40'
+                              }`}
+                            >
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  p.is_deleted ? 'bg-slate-400' : 'bg-emerald-500'
+                                }`}
+                              />
+                              {p.is_deleted
+                                ? language === 'id'
+                                  ? 'Diarsipkan'
+                                  : 'Archived'
+                                : language === 'id'
+                                ? 'Aktif'
+                                : 'Active'}
+                            </span>
                           </td>
 
-                          {/* Actions */}
+                          {/* ACTIONS */}
                           {canManage && (
-                            <td className="px-6 py-4 text-right">
+                            <td className="px-4 py-4 text-right">
                               <div className="inline-flex items-center gap-1">
+                                {hasVariants && (
+                                  <button
+                                    onClick={() => setExpandedProductId(isExpanded ? null : p.id)}
+                                    className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                                    title="View variants"
+                                  >
+                                    {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                                  </button>
+                                )}
                                 <button
                                   onClick={() => handleOpenEditModal(p)}
-                                  className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                                  className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                                   title="Edit product"
                                 >
-                                  <Edit2 className="w-4 h-4" />
+                                  <Edit2 className="w-3.5 h-3.5" />
                                 </button>
                                 <button
                                   onClick={() => {
                                     setSelectedProduct(p);
                                     setShowDeleteModal(true);
                                   }}
-                                  className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors"
+                                  className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer"
                                   title="Delete product"
                                 >
-                                  <Trash2 className="w-4 h-4" />
+                                  <Trash2 className="w-3.5 h-3.5" />
                                 </button>
                               </div>
                             </td>
@@ -620,8 +1146,8 @@ export default function ProductsPage() {
                         {/* Expandable Variants Row */}
                         {isExpanded && hasVariants && (
                           <tr className="bg-slate-50/50 dark:bg-slate-800/30">
-                            <td colSpan={canManage ? 8 : 7} className="px-8 py-3">
-                              <div className="text-xs font-semibold text-slate-500 uppercase mb-2">
+                            <td colSpan={canManage ? 7 : 6} className="px-8 py-3">
+                              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
                                 Configured Variants for {p.name}:
                               </div>
                               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
@@ -631,10 +1157,10 @@ export default function ProductsPage() {
                                     className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs"
                                   >
                                     <div className="flex items-center justify-between">
-                                      <p className="font-semibold text-slate-900 dark:text-slate-100">
+                                      <p className="font-semibold text-slate-900 dark:text-slate-100 text-xs">
                                         {v.name}
                                       </p>
-                                      <span className="font-mono text-[11px] bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
+                                      <span className="font-mono text-[10px] bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-600 dark:text-slate-400">
                                         {v.sku}
                                       </span>
                                     </div>
@@ -642,18 +1168,6 @@ export default function ProductsPage() {
                                       <span>Price: Rp {v.price.toLocaleString('id-ID')}</span>
                                       <span>Min: {v.min_stock}</span>
                                     </div>
-                                    {v.attributes && Object.keys(v.attributes).length > 0 && (
-                                      <div className="mt-1.5 flex flex-wrap gap-1">
-                                        {Object.entries(v.attributes).map(([k, val]) => (
-                                          <span
-                                            key={k}
-                                            className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] font-mono text-slate-600 dark:text-slate-400"
-                                          >
-                                            {k}: {val}
-                                          </span>
-                                        ))}
-                                      </div>
-                                    )}
                                   </div>
                                 ))}
                               </div>
@@ -668,6 +1182,69 @@ export default function ProductsPage() {
             </div>
           )}
         </div>
+
+        {/* Floating Batch Selection Bar */}
+        {selectedIds.length > 0 && (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-700 px-5 py-2.5 rounded-full shadow-xl flex items-center gap-4 text-xs font-semibold text-slate-700 dark:text-slate-200 animate-in fade-in slide-in-from-bottom-2 duration-150">
+            <span className="font-bold text-slate-900 dark:text-white border-r border-slate-200 dark:border-slate-700 pr-3">
+              {selectedIds.length} Selected
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                const selectedProducts = products.filter(p => selectedIds.includes(p.id));
+                const csvData = selectedProducts.map(p => `${p.name},${p.sku},${p.price},${p.min_stock}`).join('\n');
+                const blob = new Blob([`Name,SKU,Price,Stock\n${csvData}`], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `selected-products-${selectedIds.length}.csv`;
+                a.click();
+              }}
+              className="inline-flex items-center gap-1.5 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              <span>Export</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const first = products.find(p => p.id === selectedIds[0]);
+                if (first) handleOpenEditModal(first);
+              }}
+              className="inline-flex items-center gap-1.5 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
+            >
+              <Edit2 className="w-3.5 h-3.5" />
+              <span>Edit Info</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (confirm(`Delete ${selectedIds.length} selected products?`)) {
+                  Promise.all(selectedIds.map(id => api.delete(`/products/${id}`)))
+                    .then(() => {
+                      setSelectedIds([]);
+                      fetchProducts();
+                      setSuccessMsg(`${selectedIds.length} products deleted.`);
+                    })
+                    .catch(err => setErrorMsg(err.message || 'Failed to delete'));
+                }
+              }}
+              className="inline-flex items-center gap-1.5 text-rose-600 hover:text-rose-700 transition-colors cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedIds([])}
+              className="p-1 rounded-full text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors cursor-pointer"
+              title="Deselect all"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Product Add / Edit Modal */}
@@ -704,7 +1281,7 @@ export default function ProductsPage() {
                   required
                   value={formName}
                   onChange={(e) => setFormName(e.target.value)}
-                  className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                  className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                   placeholder="e.g. Brushless Cordless Drill 20V"
                 />
               </div>
@@ -719,7 +1296,7 @@ export default function ProductsPage() {
                     <button
                       type="button"
                       onClick={handleGenerateSKU}
-                      className="text-[11px] font-semibold text-[#7C6EF0] dark:text-[#9B8FF3] hover:underline flex items-center gap-1 cursor-pointer"
+                      className="text-[11px] font-semibold text-[#0B3333] dark:text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
                     >
                       <Sparkles className="w-3 h-3" /> Auto
                     </button>
@@ -728,7 +1305,7 @@ export default function ProductsPage() {
                     type="text"
                     value={formSku}
                     onChange={(e) => setFormSku(e.target.value)}
-                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm font-mono text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-mono text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     placeholder="e.g. TOOL-DRL-001"
                   />
                 </div>
@@ -741,7 +1318,7 @@ export default function ProductsPage() {
                     <button
                       type="button"
                       onClick={handleGenerateBarcode}
-                      className="text-[11px] font-semibold text-[#7C6EF0] dark:text-[#9B8FF3] hover:underline flex items-center gap-1 cursor-pointer"
+                      className="text-[11px] font-semibold text-[#0B3333] dark:text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
                     >
                       <Sparkles className="w-3 h-3" /> Auto
                     </button>
@@ -750,7 +1327,7 @@ export default function ProductsPage() {
                     type="text"
                     value={formBarcode}
                     onChange={(e) => setFormBarcode(e.target.value)}
-                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm font-mono text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-mono text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     placeholder="e.g. 899123456789"
                   />
                 </div>
@@ -766,7 +1343,7 @@ export default function ProductsPage() {
                     required
                     value={formCategoryId}
                     onChange={(e) => setFormCategoryId(e.target.value)}
-                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                   >
                     <option value="" disabled>
                       {language === 'id' ? 'Pilih Kategori' : 'Select Category'}
@@ -786,7 +1363,7 @@ export default function ProductsPage() {
                   <select
                     value={formUnit}
                     onChange={(e) => setFormUnit(e.target.value)}
-                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                   >
                     {STANDARD_UNITS.map((u) => (
                       <option key={u} value={u}>
@@ -811,7 +1388,7 @@ export default function ProductsPage() {
                     placeholder="0"
                     value={formPrice}
                     onChange={(e) => setFormPrice(e.target.value === '' ? '' : Number(e.target.value))}
-                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                   />
                 </div>
 
@@ -827,7 +1404,7 @@ export default function ProductsPage() {
                     placeholder="0"
                     value={formCostPrice}
                     onChange={(e) => setFormCostPrice(e.target.value === '' ? '' : Number(e.target.value))}
-                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                   />
                 </div>
 
@@ -842,7 +1419,7 @@ export default function ProductsPage() {
                     required
                     value={formMinStock}
                     onChange={(e) => setFormMinStock(e.target.value === '' ? '' : Number(e.target.value))}
-                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                   />
                 </div>
               </div>
@@ -856,7 +1433,7 @@ export default function ProductsPage() {
                   type="url"
                   value={formImageUrl}
                   onChange={(e) => setFormImageUrl(e.target.value)}
-                  className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                  className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                   placeholder="https://..."
                 />
               </div>
@@ -869,7 +1446,7 @@ export default function ProductsPage() {
                   rows={2}
                   value={formDescription}
                   onChange={(e) => setFormDescription(e.target.value)}
-                  className="block w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] resize-none transition-colors"
+                  className="block w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] resize-none transition-colors"
                   placeholder="Product specifications and details..."
                 />
               </div>
@@ -888,7 +1465,7 @@ export default function ProductsPage() {
                   <button
                     type="button"
                     onClick={handleAddVariantRow}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-[#7C6EF0] dark:text-[#9B8FF3] bg-[#7C6EF0]/10 hover:bg-[#7C6EF0]/20 transition-colors cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-[#0B3333] dark:text-emerald-400 bg-[#0B3333]/10 hover:bg-[#0B3333]/20 transition-colors cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" /> Add Variant
                   </button>
@@ -903,7 +1480,7 @@ export default function ProductsPage() {
                     {formVariants.map((v, idx) => (
                       <div
                         key={idx}
-                        className="p-4 bg-white dark:bg-slate-800/80 rounded-2xl border border-[#EEEDF5] dark:border-slate-700/80 shadow-2xs relative space-y-2.5"
+                        className="p-4 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700/80 shadow-2xs relative space-y-2.5"
                       >
                         <button
                           type="button"
@@ -930,7 +1507,7 @@ export default function ProductsPage() {
                                   )
                                 );
                               }}
-                              className="w-full h-9 px-3 text-xs bg-white dark:bg-slate-900 border border-[#EEEDF5] dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                              className="w-full h-9 px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                               placeholder="e.g. Size 42 or 20V Pro"
                             />
                           </div>
@@ -950,7 +1527,7 @@ export default function ProductsPage() {
                                   )
                                 );
                               }}
-                              className="w-full h-9 px-3 text-xs font-mono bg-white dark:bg-slate-900 border border-[#EEEDF5] dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                              className="w-full h-9 px-3 text-xs font-mono bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                               placeholder="Auto if empty"
                             />
                           </div>
@@ -974,7 +1551,7 @@ export default function ProductsPage() {
                                   )
                                 );
                               }}
-                              className="w-full h-9 px-3 text-xs bg-white dark:bg-slate-900 border border-[#EEEDF5] dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                              className="w-full h-9 px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                             />
                           </div>
                         </div>
@@ -995,7 +1572,7 @@ export default function ProductsPage() {
                                   )
                                 );
                               }}
-                              className="w-full h-9 px-3 text-xs bg-white dark:bg-slate-900 border border-[#EEEDF5] dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                              className="w-full h-9 px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                             />
                           </div>
                           <div>
@@ -1013,7 +1590,7 @@ export default function ProductsPage() {
                                   )
                                 );
                               }}
-                              className="w-full h-9 px-3 text-xs bg-white dark:bg-slate-900 border border-[#EEEDF5] dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                              className="w-full h-9 px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                             />
                           </div>
                         </div>
@@ -1028,14 +1605,14 @@ export default function ProductsPage() {
                 <button
                   type="button"
                   onClick={() => setShowProductModal(false)}
-                  className="px-5 py-2.5 rounded-full text-sm font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                  className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                 >
                   {t('cancel')}
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-[#7C6EF0] hover:bg-[#6C5CE7] text-white font-semibold text-sm transition-all shadow-sm shadow-[#7C6EF0]/20 cursor-pointer disabled:opacity-50"
+                  className="inline-flex items-center justify-center gap-2 px-5 py-2 rounded-xl bg-[#0B3333] hover:bg-[#0B3333]/90 text-white font-semibold text-sm transition-colors shadow-xs cursor-pointer disabled:opacity-50"
                 >
                   {isSubmitting ? (
                     <>
@@ -1087,7 +1664,7 @@ export default function ProductsPage() {
                   required
                   value={catName}
                   onChange={(e) => setCatName(e.target.value)}
-                  className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                  className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                   placeholder="e.g. Electrical Components"
                 />
               </div>
@@ -1100,7 +1677,7 @@ export default function ProductsPage() {
                   rows={2}
                   value={catDesc}
                   onChange={(e) => setCatDesc(e.target.value)}
-                  className="block w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] resize-none transition-colors"
+                  className="block w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] resize-none transition-colors"
                   placeholder="Category scope and notes..."
                 />
               </div>
@@ -1109,14 +1686,14 @@ export default function ProductsPage() {
                 <button
                   type="button"
                   onClick={() => setShowCategoryModal(false)}
-                  className="px-5 py-2.5 rounded-full text-sm font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                  className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                 >
                   {t('cancel')}
                 </button>
                 <button
                   type="submit"
                   disabled={isCatSubmitting}
-                  className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-[#7C6EF0] hover:bg-[#6C5CE7] text-white font-semibold text-sm transition-all shadow-sm shadow-[#7C6EF0]/20 cursor-pointer disabled:opacity-50"
+                  className="inline-flex items-center justify-center gap-2 px-5 py-2 rounded-xl bg-[#0B3333] hover:bg-[#0B3333]/90 text-white font-semibold text-sm transition-colors shadow-xs cursor-pointer disabled:opacity-50"
                 >
                   {isCatSubmitting ? (
                     <>
@@ -1156,7 +1733,7 @@ export default function ProductsPage() {
               <button
                 type="button"
                 onClick={() => setShowDeleteModal(false)}
-                className="px-5 py-2.5 rounded-full text-sm font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
               >
                 {t('cancel')}
               </button>
@@ -1164,7 +1741,7 @@ export default function ProductsPage() {
                 type="button"
                 onClick={handleDeleteProduct}
                 disabled={isSubmitting}
-                className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-rose-600 hover:bg-rose-700 text-white font-semibold text-sm transition-all shadow-sm shadow-rose-600/20 cursor-pointer disabled:opacity-50"
+                className="inline-flex items-center justify-center gap-2 px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold text-sm transition-colors shadow-xs cursor-pointer disabled:opacity-50"
               >
                 {isSubmitting ? (
                   <>

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -116,6 +117,20 @@ func main() {
 	// 5. Setup Gin Router
 	router := gin.Default()
 
+	// SEC-001: Configure trusted proxies to prevent client IP spoofing via X-Forwarded-For
+	if cfg.TrustedProxies != "" {
+		proxies := strings.Split(cfg.TrustedProxies, ",")
+		for i := range proxies {
+			proxies[i] = strings.TrimSpace(proxies[i])
+		}
+		if err := router.SetTrustedProxies(proxies); err != nil {
+			log.Printf("Warning: failed to set trusted proxies: %v\n", err)
+		}
+	} else {
+		// In standalone/direct deployment, trust no upstream proxies so c.ClientIP() cannot be spoofed
+		_ = router.SetTrustedProxies(nil)
+	}
+
 	// Security response headers (OWASP best practices: XSS, Clickjacking, MIME-sniffing, HSTS)
 	router.Use(middleware.SecurityHeadersMiddleware())
 
@@ -134,14 +149,15 @@ func main() {
 		})
 	})
 
-	// API v1 routes (protected by general API rate limiting, CSRF verification, and 15s cache)
+	// API v1 routes (protected by general API rate limiting and CSRF verification)
+	authMid := middleware.AuthMiddleware(cfg, userRepo)
+
 	v1 := router.Group("/api/v1")
 	v1.Use(apiLimiter.Middleware())
 	v1.Use(middleware.CSRFProtectionMiddleware(cfg))
-	v1.Use(middleware.CacheMiddleware(15 * time.Second))
 	{
 		// Real-time events SSE stream (Protected by AuthMiddleware)
-		v1.GET("/events", middleware.AuthMiddleware(cfg), func(c *gin.Context) {
+		v1.GET("/events", authMid, func(c *gin.Context) {
 			events.GetBroker().ServeHTTP(c)
 		})
 
@@ -154,155 +170,149 @@ func main() {
 
 			// Protected auth routes
 			authProtected := authGroup.Group("")
-			authProtected.Use(middleware.AuthMiddleware(cfg))
+			authProtected.Use(authMid)
 			{
 				authProtected.GET("/me", authHandler.GetMe)
 			}
 		}
 
-		// User Management routes (RBAC protected)
-		usersGroup := v1.Group("/users")
-		usersGroup.Use(middleware.AuthMiddleware(cfg))
+		// Authenticated API routes with Response Cache (Cache is evaluated AFTER Auth validation)
+		apiAuth := v1.Group("")
+		apiAuth.Use(authMid)
+		apiAuth.Use(middleware.CacheMiddleware(15 * time.Second))
 		{
-			// Super Admin & Warehouse Manager can list users; ONLY Super Admin can create, update, delete
-			usersGroup.GET("", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), authHandler.ListUsers)
-			usersGroup.POST("", middleware.RequireRoles(models.RoleSuperAdmin), authHandler.RegisterUser)
-			usersGroup.PUT("/:id", middleware.RequireRoles(models.RoleSuperAdmin), authHandler.UpdateUser)
-			usersGroup.DELETE("/:id", middleware.RequireRoles(models.RoleSuperAdmin), authHandler.DeleteUser)
-		}
+			// User Management routes (RBAC protected)
+			usersGroup := apiAuth.Group("/users")
+			{
+				usersGroup.GET("", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), authHandler.ListUsers)
+				usersGroup.POST("", middleware.RequireRoles(models.RoleSuperAdmin), authHandler.RegisterUser)
+				usersGroup.PUT("/:id", middleware.RequireRoles(models.RoleSuperAdmin), authHandler.UpdateUser)
+				usersGroup.DELETE("/:id", middleware.RequireRoles(models.RoleSuperAdmin), authHandler.DeleteUser)
+			}
 
-		// Products routes
-		productsGroup := v1.Group("/products")
-		productsGroup.Use(middleware.AuthMiddleware(cfg))
-		{
-			productsGroup.GET("", productHandler.ListProducts)
-			productsGroup.GET("/:id", productHandler.GetProductByID)
-			productsGroup.POST("", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), productHandler.CreateProduct)
-			productsGroup.PUT("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), productHandler.UpdateProduct)
-			productsGroup.DELETE("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), productHandler.DeleteProduct)
-		}
+			// Products routes
+			productsGroup := apiAuth.Group("/products")
+			{
+				productsGroup.GET("", productHandler.ListProducts)
+				productsGroup.GET("/:id", productHandler.GetProductByID)
+				productsGroup.POST("", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), productHandler.CreateProduct)
+				productsGroup.PUT("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), productHandler.UpdateProduct)
+				productsGroup.DELETE("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), productHandler.DeleteProduct)
+			}
 
-		// Categories routes
-		categoriesGroup := v1.Group("/categories")
-		categoriesGroup.Use(middleware.AuthMiddleware(cfg))
-		{
-			categoriesGroup.GET("", productHandler.ListCategories)
-			categoriesGroup.POST("", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), productHandler.CreateCategory)
-		}
+			// Categories routes
+			categoriesGroup := apiAuth.Group("/categories")
+			{
+				categoriesGroup.GET("", productHandler.ListCategories)
+				categoriesGroup.POST("", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), productHandler.CreateCategory)
+			}
 
-		// Warehouse routes
-		whGroup := v1.Group("/warehouses")
-		whGroup.Use(middleware.AuthMiddleware(cfg))
-		{
-			whGroup.GET("", whHandler.ListWarehouses)
-			whGroup.GET("/:id", whHandler.GetWarehouseByID)
-			whGroup.POST("", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), whHandler.CreateWarehouse)
-			whGroup.PUT("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), whHandler.UpdateWarehouse)
-			whGroup.DELETE("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), whHandler.DeleteWarehouse)
+			// Warehouse routes
+			whGroup := apiAuth.Group("/warehouses")
+			{
+				whGroup.GET("", whHandler.ListWarehouses)
+				whGroup.GET("/:id", whHandler.GetWarehouseByID)
+				whGroup.POST("", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), whHandler.CreateWarehouse)
+				whGroup.PUT("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), whHandler.UpdateWarehouse)
+				whGroup.DELETE("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), whHandler.DeleteWarehouse)
 
-			// Locations / Bins inside Warehouse
-			whGroup.GET("/:id/locations", whHandler.ListLocations)
-			whGroup.POST("/:id/locations", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), whHandler.CreateLocation)
-		}
+				// Locations / Bins inside Warehouse
+				whGroup.GET("/:id/locations", whHandler.ListLocations)
+				whGroup.POST("/:id/locations", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), whHandler.CreateLocation)
+			}
 
-		// Location direct routes
-		locGroup := v1.Group("/locations")
-		locGroup.Use(middleware.AuthMiddleware(cfg))
-		{
-			locGroup.DELETE("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), whHandler.DeleteLocation)
-		}
+			// Location direct routes
+			locGroup := apiAuth.Group("/locations")
+			{
+				locGroup.DELETE("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), whHandler.DeleteLocation)
+			}
 
-		// Inventory routes
-		invGroup := v1.Group("/inventory")
-		invGroup.Use(middleware.AuthMiddleware(cfg))
-		{
-			invGroup.GET("", invHandler.ListInventory)
-			invGroup.GET("/stats", invHandler.GetStats)
-			invGroup.GET("/movements", invHandler.ListMovements)
-			invGroup.GET("/analytics/flow", invHandler.GetStockFlowAnalytics)
-			invGroup.GET("/analytics/capacity", invHandler.GetWarehouseCapacityAnalytics)
-			invGroup.POST("/stock-in", invHandler.StockIn)
-			invGroup.POST("/stock-out", invHandler.StockOut)
-			invGroup.POST("/adjust", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), invHandler.AdjustStock)
-		}
+			// Inventory routes
+			invGroup := apiAuth.Group("/inventory")
+			{
+				invGroup.GET("", invHandler.ListInventory)
+				invGroup.GET("/stats", invHandler.GetStats)
+				invGroup.GET("/movements", invHandler.ListMovements)
+				invGroup.GET("/analytics/flow", invHandler.GetStockFlowAnalytics)
+				invGroup.GET("/analytics/capacity", invHandler.GetWarehouseCapacityAnalytics)
+				invGroup.POST("/stock-in", invHandler.StockIn)
+				invGroup.POST("/stock-out", invHandler.StockOut)
+				invGroup.POST("/adjust", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), invHandler.AdjustStock)
+			}
 
-		// Supplier routes
-		supGroup := v1.Group("/suppliers")
-		supGroup.Use(middleware.AuthMiddleware(cfg))
-		{
-			supGroup.GET("", poHandler.ListSuppliers)
-			supGroup.GET("/:id", poHandler.GetSupplierByID)
-			supGroup.POST("", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), poHandler.CreateSupplier)
-			supGroup.PUT("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), poHandler.UpdateSupplier)
-			supGroup.DELETE("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), poHandler.DeleteSupplier)
-		}
+			// Supplier routes
+			supGroup := apiAuth.Group("/suppliers")
+			{
+				supGroup.GET("", poHandler.ListSuppliers)
+				supGroup.GET("/:id", poHandler.GetSupplierByID)
+				supGroup.POST("", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), poHandler.CreateSupplier)
+				supGroup.PUT("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), poHandler.UpdateSupplier)
+				supGroup.DELETE("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), poHandler.DeleteSupplier)
+			}
 
-		// Purchase Order routes
-		poGroup := v1.Group("/purchase-orders")
-		poGroup.Use(middleware.AuthMiddleware(cfg))
-		{
-			poGroup.GET("", poHandler.ListPOs)
-			poGroup.GET("/stats", poHandler.GetPOStats)
-			poGroup.GET("/:id", poHandler.GetPOByID)
-			poGroup.POST("", poHandler.CreatePO)
-			poGroup.PUT("/:id", poHandler.UpdatePO)
-			poGroup.DELETE("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), poHandler.DeletePO)
-			poGroup.POST("/:id/order", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), poHandler.MarkOrdered)
-			poGroup.POST("/:id/cancel", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), poHandler.CancelPO)
-			poGroup.POST("/:id/receive", poHandler.ReceivePO)
-		}
+			// Purchase Order routes
+			poGroup := apiAuth.Group("/purchase-orders")
+			{
+				poGroup.GET("", poHandler.ListPOs)
+				poGroup.GET("/stats", poHandler.GetPOStats)
+				poGroup.GET("/:id", poHandler.GetPOByID)
+				poGroup.POST("", poHandler.CreatePO)
+				poGroup.PUT("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), poHandler.UpdatePO)
+				poGroup.DELETE("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), poHandler.DeletePO)
+				poGroup.POST("/:id/order", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), poHandler.MarkOrdered)
+				poGroup.POST("/:id/cancel", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), poHandler.CancelPO)
+				poGroup.POST("/:id/receive", poHandler.ReceivePO)
+			}
 
-		// Customer routes
-		custGroup := v1.Group("/customers")
-		custGroup.Use(middleware.AuthMiddleware(cfg))
-		{
-			custGroup.GET("", soHandler.ListCustomers)
-			custGroup.GET("/:id", soHandler.GetCustomerByID)
-			custGroup.POST("", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager, models.RoleWarehouseStaff), soHandler.CreateCustomer)
-			custGroup.PUT("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), soHandler.UpdateCustomer)
-			custGroup.DELETE("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), soHandler.DeleteCustomer)
-		}
+			// Customer routes
+			custGroup := apiAuth.Group("/customers")
+			{
+				custGroup.GET("", soHandler.ListCustomers)
+				custGroup.GET("/:id", soHandler.GetCustomerByID)
+				custGroup.POST("", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager, models.RoleWarehouseStaff), soHandler.CreateCustomer)
+				custGroup.PUT("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), soHandler.UpdateCustomer)
+				custGroup.DELETE("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), soHandler.DeleteCustomer)
+			}
 
-		// Sales Order routes
-		soGroup := v1.Group("/sales-orders")
-		soGroup.Use(middleware.AuthMiddleware(cfg))
-		{
-			soGroup.GET("", soHandler.ListSOs)
-			soGroup.GET("/stats", soHandler.GetSOStats)
-			soGroup.GET("/:id", soHandler.GetSOByID)
-			soGroup.POST("", soHandler.CreateSO)
-			soGroup.PUT("/:id", soHandler.UpdateSO)
-			soGroup.DELETE("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), soHandler.DeleteSO)
-			soGroup.POST("/:id/confirm", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), soHandler.ConfirmSO)
-			soGroup.POST("/:id/picking", soHandler.StartPicking)
-			soGroup.POST("/:id/packing", soHandler.StartPacking)
-			soGroup.POST("/:id/dispatch", soHandler.DispatchSO)
-			soGroup.POST("/:id/deliver", soHandler.DeliverSO)
-			soGroup.POST("/:id/cancel", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), soHandler.CancelSO)
-		}
+			// Sales Order routes
+			soGroup := apiAuth.Group("/sales-orders")
+			{
+				soGroup.GET("", soHandler.ListSOs)
+				soGroup.GET("/stats", soHandler.GetSOStats)
+				soGroup.GET("/:id", soHandler.GetSOByID)
+				soGroup.POST("", soHandler.CreateSO)
+				soGroup.PUT("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), soHandler.UpdateSO)
+				soGroup.DELETE("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), soHandler.DeleteSO)
+				soGroup.POST("/:id/confirm", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), soHandler.ConfirmSO)
+				soGroup.POST("/:id/picking", soHandler.StartPicking)
+				soGroup.POST("/:id/packing", soHandler.StartPacking)
+				soGroup.POST("/:id/dispatch", soHandler.DispatchSO)
+				soGroup.POST("/:id/deliver", soHandler.DeliverSO)
+				soGroup.POST("/:id/cancel", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), soHandler.CancelSO)
+			}
 
-		// Notification routes
-		notifGroup := v1.Group("/notifications")
-		notifGroup.Use(middleware.AuthMiddleware(cfg))
-		{
-			notifGroup.GET("", notifHandler.GetNotifications)
-			notifGroup.PATCH("/:id/read", notifHandler.MarkAsRead)
-			notifGroup.POST("/mark-all-read", notifHandler.MarkAllAsRead)
-			notifGroup.DELETE("/:id", notifHandler.DeleteNotification)
-			notifGroup.DELETE("", notifHandler.ClearReadNotifications)
-		}
+			// Notification routes
+			notifGroup := apiAuth.Group("/notifications")
+			{
+				notifGroup.GET("", notifHandler.GetNotifications)
+				notifGroup.PATCH("/:id/read", notifHandler.MarkAsRead)
+				notifGroup.POST("/mark-all-read", notifHandler.MarkAllAsRead)
+				notifGroup.DELETE("/:id", notifHandler.DeleteNotification)
+				notifGroup.DELETE("", notifHandler.ClearReadNotifications)
+			}
 
-		// Super Admin specific diagnostic route
-		adminGroup := v1.Group("/admin")
-		adminGroup.Use(middleware.AuthMiddleware(cfg), middleware.RequireRoles(models.RoleSuperAdmin))
-		{
-			adminGroup.GET("/diagnostics", func(c *gin.Context) {
-				utils.SuccessResponse(c, http.StatusOK, "Super Admin access verified", gin.H{
-					"role":        c.GetString(middleware.ContextRole),
-					"user_id":     c.GetString(middleware.ContextUserID),
-					"admin_email": c.GetString(middleware.ContextEmail),
+			// Super Admin specific diagnostic route
+			adminGroup := apiAuth.Group("/admin")
+			adminGroup.Use(middleware.RequireRoles(models.RoleSuperAdmin))
+			{
+				adminGroup.GET("/diagnostics", func(c *gin.Context) {
+					utils.SuccessResponse(c, http.StatusOK, "Super Admin access verified", gin.H{
+						"role":        c.GetString(middleware.ContextRole),
+						"user_id":     c.GetString(middleware.ContextUserID),
+						"admin_email": c.GetString(middleware.ContextEmail),
+					})
 				})
-			})
+			}
 		}
 	}
 

@@ -21,7 +21,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-950">
-      <Loader2 className="w-10 h-10 animate-spin text-indigo-600 mb-4" />
+      <Loader2 className="w-10 h-10 animate-spin text-[#0B3333] dark:text-[#2dd4bf] mb-4" />
       <p className="text-slate-600 dark:text-slate-400 font-medium text-sm">
         Initializing StockFlow...
       </p>

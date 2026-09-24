@@ -13,14 +13,12 @@ import {
   ShieldAlert,
   ShieldCheck,
   UserCheck,
-  CheckCircle2,
   AlertCircle,
   Loader2,
   X,
   Mail,
   Lock,
   User as UserIcon,
-  Shield,
   Pencil,
   Trash2,
 } from 'lucide-react';
@@ -50,11 +48,11 @@ export default function UsersPage() {
       if (res.success && res.data) {
         setUsers(res.data.users || []);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof ApiError) {
         setError(err.message);
       } else {
-        setError('Failed to fetch user list');
+        setError((err as Error).message || 'Failed to fetch user list');
       }
     } finally {
       setIsLoading(false);
@@ -62,15 +60,19 @@ export default function UsersPage() {
   }, []);
 
   useEffect(() => {
-    fetchUsers();
+    const timer = setTimeout(() => {
+      void fetchUsers();
+    }, 0);
+    return () => clearTimeout(timer);
   }, [fetchUsers]);
 
   // Real-time auto-refresh across browsers
   useEffect(() => {
-    const handleSync = (e: any) => {
-      const resource = e?.detail?.resource;
+    const handleSync = (e: Event) => {
+      const customEvent = e as CustomEvent<{ resource?: string }>;
+      const resource = customEvent?.detail?.resource;
       if (!resource || resource === 'users') {
-        fetchUsers();
+        void fetchUsers();
       }
     };
     if (typeof window !== 'undefined') {
@@ -111,7 +113,13 @@ export default function UsersPage() {
     setIsEditSubmitting(true);
 
     try {
-      const payload: any = {
+      const payload: {
+        name: string;
+        email: string;
+        role: Role;
+        is_active: boolean;
+        password?: string;
+      } = {
         name: editName,
         email: editEmail,
         role: editRole,
@@ -129,13 +137,13 @@ export default function UsersPage() {
             : `User ${editName} successfully updated!`
         );
         setEditingUser(null);
-        fetchUsers();
+        void fetchUsers();
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof ApiError) {
         setEditError(err.message);
       } else {
-        setEditError('Failed to update user');
+        setEditError((err as Error).message || 'Failed to update user');
       }
     } finally {
       setIsEditSubmitting(false);
@@ -156,13 +164,13 @@ export default function UsersPage() {
             : `User ${deletingUser.name} successfully deleted!`
         );
         setDeletingUser(null);
-        fetchUsers();
+        void fetchUsers();
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof ApiError) {
         setDeleteError(err.message);
       } else {
-        setDeleteError('Failed to delete user');
+        setDeleteError((err as Error).message || 'Failed to delete user');
       }
     } finally {
       setIsDeleting(false);
@@ -192,13 +200,13 @@ export default function UsersPage() {
         setName('');
         setEmail('');
         setPassword('');
-        fetchUsers();
+        void fetchUsers();
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof ApiError) {
         setFormError(err.message);
       } else {
-        setFormError('Failed to create user');
+        setFormError((err as Error).message || 'Failed to create user');
       }
     } finally {
       setIsSubmitting(false);
@@ -209,19 +217,19 @@ export default function UsersPage() {
     switch (r) {
       case 'super_admin':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300">
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#0B3333]/10 text-[#0B3333] dark:bg-[#0B3333]/30 dark:text-[#2dd4bf] border border-[#0B3333]/20">
             <ShieldAlert className="w-3 h-3" /> {t('roleSuperAdmin')}
           </span>
         );
       case 'warehouse_manager':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300">
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border border-blue-200/50">
             <ShieldCheck className="w-3 h-3" /> {t('roleWarehouseManager')}
           </span>
         );
       case 'warehouse_staff':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200/50">
             <UserCheck className="w-3 h-3" /> {t('roleWarehouseStaff')}
           </span>
         );
@@ -252,7 +260,7 @@ export default function UsersPage() {
                 setFormError(null);
                 setShowModal(true);
               }}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#7C6EF0] hover:bg-[#6C5CE7] text-white font-semibold text-sm transition-all shadow-sm shadow-[#7C6EF0]/20 self-start sm:self-auto cursor-pointer"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#0B3333] hover:bg-[#082626] text-white font-semibold text-sm transition-all shadow-xs self-start sm:self-auto cursor-pointer"
             >
               <UserPlus className="w-4 h-4 stroke-[2.5]" />
               <span>{t('addNewUserBtn')}</span>
@@ -273,10 +281,10 @@ export default function UsersPage() {
         />
 
         {/* Users Table */}
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
           {isLoading ? (
             <div className="py-16 flex flex-col items-center justify-center text-slate-500">
-              <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mb-2" />
+              <Loader2 className="w-8 h-8 animate-spin text-[#0B3333] dark:text-[#2dd4bf] mb-2" />
               <p className="text-sm">Fetching team members...</p>
             </div>
           ) : users.length === 0 ? (
@@ -305,7 +313,7 @@ export default function UsersPage() {
                     <tr key={u.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors">
                       <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">
                         <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-xs">
+                          <div className="w-8 h-8 rounded-full bg-[#0B3333]/10 dark:bg-[#0B3333]/30 text-[#0B3333] dark:text-[#2dd4bf] flex items-center justify-center font-bold text-xs">
                             {u.name.charAt(0)}
                           </div>
                           <span>{u.name}</span>
@@ -319,18 +327,18 @@ export default function UsersPage() {
                       </td>
                       <td className="px-6 py-4">
                         {u.is_active ? (
-                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/50">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
                             {t('active')}
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
                             <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
                             {language === 'id' ? 'Nonaktif' : 'Inactive'}
                           </span>
                         )}
                       </td>
-                      <td className="px-6 py-4 text-xs text-slate-500">
+                      <td className="px-6 py-4 text-xs text-slate-500 font-mono">
                         {new Date(u.created_at).toLocaleDateString(undefined, {
                           year: 'numeric',
                           month: 'short',
@@ -343,7 +351,7 @@ export default function UsersPage() {
                             <button
                               type="button"
                               onClick={() => openEditModal(u)}
-                              className="p-1.5 rounded-lg text-slate-500 hover:text-[#7C6EF0] hover:bg-[#7C6EF0]/10 dark:hover:bg-[#7C6EF0]/20 transition-colors cursor-pointer"
+                              className="p-1.5 rounded-lg text-slate-500 hover:text-[#0B3333] hover:bg-[#0B3333]/10 dark:hover:text-[#2dd4bf] dark:hover:bg-[#0B3333]/20 transition-colors cursor-pointer"
                               title={language === 'id' ? 'Ubah Pengguna' : 'Edit User'}
                             >
                               <Pencil className="w-4 h-4" />
@@ -376,7 +384,7 @@ export default function UsersPage() {
       {/* Add User Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800">
+          <div className="bg-white dark:bg-slate-900 rounded-xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800">
             <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
               <h3 className="text-lg font-bold text-slate-900 dark:text-white">
                 {t('modalAddUserTitle')}
@@ -410,7 +418,7 @@ export default function UsersPage() {
                     required
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    className="block w-full h-10 pl-9 pr-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="block w-full h-10 pl-9 pr-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     placeholder="Budi Santoso"
                   />
                 </div>
@@ -429,7 +437,7 @@ export default function UsersPage() {
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="block w-full h-10 pl-9 pr-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="block w-full h-10 pl-9 pr-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     placeholder="budi@stockflow.com"
                   />
                 </div>
@@ -449,7 +457,7 @@ export default function UsersPage() {
                     minLength={8}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="block w-full h-10 pl-9 pr-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="block w-full h-10 pl-9 pr-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     placeholder="Min. 8 characters"
                   />
                 </div>
@@ -462,7 +470,7 @@ export default function UsersPage() {
                 <select
                   value={userRole}
                   onChange={(e) => setUserRole(e.target.value as Role)}
-                  className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                  className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors cursor-pointer"
                 >
                   <option value="warehouse_staff">{t('roleWarehouseStaff')}</option>
                   <option value="warehouse_manager">{t('roleWarehouseManager')}</option>
@@ -476,14 +484,14 @@ export default function UsersPage() {
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="px-5 py-2.5 text-sm font-semibold rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                  className="px-5 py-2.5 text-sm font-semibold rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:border-[#0B3333] hover:text-[#0B3333] dark:hover:border-[#2dd4bf] dark:hover:text-[#2dd4bf] transition-colors cursor-pointer shadow-2xs"
                 >
                   {t('cancel')}
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-[#7C6EF0] hover:bg-[#6C5CE7] text-white font-semibold text-sm transition-all shadow-sm shadow-[#7C6EF0]/20 cursor-pointer disabled:opacity-50"
+                  className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-[#0B3333] hover:bg-[#082626] text-white font-semibold text-sm transition-all shadow-xs cursor-pointer disabled:opacity-50"
                 >
                   {isSubmitting ? (
                     <>
@@ -503,7 +511,7 @@ export default function UsersPage() {
       {/* Edit User Modal */}
       {editingUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800">
+          <div className="bg-white dark:bg-slate-900 rounded-xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800">
             <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
               <h3 className="text-lg font-bold text-slate-900 dark:text-white">
                 {t('modalEditUserTitle')}
@@ -537,7 +545,7 @@ export default function UsersPage() {
                     required
                     value={editName}
                     onChange={(e) => setEditName(e.target.value)}
-                    className="block w-full h-10 pl-9 pr-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="block w-full h-10 pl-9 pr-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                   />
                 </div>
               </div>
@@ -555,7 +563,7 @@ export default function UsersPage() {
                     required
                     value={editEmail}
                     onChange={(e) => setEditEmail(e.target.value)}
-                    className="block w-full h-10 pl-9 pr-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="block w-full h-10 pl-9 pr-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                   />
                 </div>
               </div>
@@ -567,7 +575,7 @@ export default function UsersPage() {
                 <select
                   value={editRole}
                   onChange={(e) => setEditRole(e.target.value as Role)}
-                  className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                  className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors cursor-pointer"
                 >
                   <option value="warehouse_staff">{t('roleWarehouseStaff')}</option>
                   <option value="warehouse_manager">{t('roleWarehouseManager')}</option>
@@ -582,7 +590,7 @@ export default function UsersPage() {
                 <select
                   value={editIsActive ? 'active' : 'inactive'}
                   onChange={(e) => setEditIsActive(e.target.value === 'active')}
-                  className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                  className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors cursor-pointer"
                 >
                   <option value="active">{t('userActive')}</option>
                   <option value="inactive">{t('userInactive')}</option>
@@ -602,7 +610,7 @@ export default function UsersPage() {
                     minLength={8}
                     value={editPassword}
                     onChange={(e) => setEditPassword(e.target.value)}
-                    className="block w-full h-10 pl-9 pr-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="block w-full h-10 pl-9 pr-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     placeholder={language === 'id' ? 'Min. 8 karakter (opsional)' : 'Min. 8 characters (optional)'}
                   />
                 </div>
@@ -612,14 +620,14 @@ export default function UsersPage() {
                 <button
                   type="button"
                   onClick={() => setEditingUser(null)}
-                  className="px-5 py-2.5 text-sm font-semibold rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                  className="px-5 py-2.5 text-sm font-semibold rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:border-[#0B3333] hover:text-[#0B3333] dark:hover:border-[#2dd4bf] dark:hover:text-[#2dd4bf] transition-colors cursor-pointer shadow-2xs"
                 >
                   {t('cancel')}
                 </button>
                 <button
                   type="submit"
                   disabled={isEditSubmitting}
-                  className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-[#7C6EF0] hover:bg-[#6C5CE7] text-white font-semibold text-sm transition-all shadow-sm shadow-[#7C6EF0]/20 cursor-pointer disabled:opacity-50"
+                  className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-[#0B3333] hover:bg-[#082626] text-white font-semibold text-sm transition-all shadow-xs cursor-pointer disabled:opacity-50"
                 >
                   {isEditSubmitting ? (
                     <>
@@ -639,7 +647,7 @@ export default function UsersPage() {
       {/* Delete User Confirmation Modal */}
       {deletingUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800">
+          <div className="bg-white dark:bg-slate-900 rounded-xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800">
             <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
               <h3 className="text-lg font-bold text-rose-600 dark:text-rose-400 flex items-center gap-2">
                 <AlertCircle className="w-5 h-5" />
@@ -683,7 +691,7 @@ export default function UsersPage() {
                 <button
                   type="button"
                   onClick={() => setDeletingUser(null)}
-                  className="px-5 py-2.5 text-sm font-semibold rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                  className="px-5 py-2.5 text-sm font-semibold rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:border-slate-300 dark:hover:border-slate-700 transition-colors cursor-pointer shadow-2xs"
                 >
                   {t('cancel')}
                 </button>
@@ -691,7 +699,7 @@ export default function UsersPage() {
                   type="button"
                   onClick={handleDeleteUser}
                   disabled={isDeleting}
-                  className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-rose-600 hover:bg-rose-700 text-white font-semibold text-sm transition-all shadow-sm shadow-rose-600/20 cursor-pointer disabled:opacity-50"
+                  className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold text-sm transition-all shadow-sm shadow-rose-600/20 cursor-pointer disabled:opacity-50"
                 >
                   {isDeleting ? (
                     <>

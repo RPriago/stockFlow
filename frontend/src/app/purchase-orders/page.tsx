@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import FloatingToast from '@/components/FloatingToast';
-import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { api } from '@/lib/api';
 import {
@@ -32,14 +31,17 @@ import {
   Eye,
   Send,
   Ban,
-  DollarSign,
   PackageCheck,
   Clock,
   Trash2,
   ArrowDownLeft,
+  ArrowUpRight,
+  ArrowDownRight,
   Phone,
   Mail,
   User as UserIcon,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 
 interface FormLineItem {
@@ -61,10 +63,10 @@ interface FormReceiveItem {
   unit: string;
 }
 
+const generateSupplierCode = () => 'SUP-' + Math.floor(100 + Math.random() * 900);
+
 export default function PurchaseOrdersPage() {
-  const { user, role } = useAuth();
   const { t, language } = useLanguage();
-  const canManage = role === 'super_admin' || role === 'warehouse_manager';
 
   // Active Tab: 'orders' or 'suppliers'
   const [activeTab, setActiveTab] = useState<'orders' | 'suppliers'>('orders');
@@ -86,6 +88,75 @@ export default function PurchaseOrdersPage() {
   const [warehouseFilter, setWarehouseFilter] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [supplierSearchQuery, setSupplierSearchQuery] = useState<string>('');
+
+  // Responsive KPI metrics collapse state
+  const [showAllMetrics, setShowAllMetrics] = useState(false);
+  const [currentTime, setCurrentTime] = useState<number>(0);
+
+  useEffect(() => {
+    setCurrentTime(Date.now());
+  }, []);
+
+  // Precise 7-day metric calculations (rounded to 1 decimal place)
+  const poMetrics = useMemo(() => {
+    const now = currentTime || 0;
+    const sevenDaysAgo = now > 0 ? now - 7 * 24 * 60 * 60 * 1000 : 0;
+
+    const calcDiff = (current: number, recentCount: number, isGoodWhenUp: boolean = true) => {
+      const baseline = current - recentCount;
+      let change = '+0.0%';
+      let isPositive = isGoodWhenUp;
+
+      if (baseline > 0) {
+        const pct = (recentCount / baseline) * 100;
+        change = `+${pct.toFixed(1)}%`;
+        isPositive = isGoodWhenUp;
+      } else if (current > 0) {
+        change = '+100.0%';
+        isPositive = isGoodWhenUp;
+      } else {
+        change = '+0.0%';
+        isPositive = true;
+      }
+      return { change, isPositive };
+    };
+
+    // 1. Total POs
+    const totalOrders = stats?.total_orders ?? orders.length;
+    const recentOrders = orders.filter(o => sevenDaysAgo > 0 && new Date(o.created_at).getTime() >= sevenDaysAgo);
+    const totalMetric = calcDiff(totalOrders, recentOrders.length, true);
+
+    // 2. Drafts
+    const draftOrders = orders.filter(o => o.status === 'draft');
+    const totalDrafts = stats?.draft_orders ?? draftOrders.length;
+    const recentDrafts = draftOrders.filter(o => sevenDaysAgo > 0 && new Date(o.created_at).getTime() >= sevenDaysAgo);
+    const draftsMetric = calcDiff(totalDrafts, recentDrafts.length, true);
+
+    // 3. Pending Intake
+    const pendingOrders = orders.filter(o => o.status === 'ordered' || o.status === 'partially_received');
+    const totalPending = stats?.pending_orders ?? pendingOrders.length;
+    const recentPending = pendingOrders.filter(o => sevenDaysAgo > 0 && new Date(o.created_at).getTime() >= sevenDaysAgo);
+    const pendingMetric = calcDiff(totalPending, recentPending.length, true);
+
+    // 4. Received
+    const completedOrders = orders.filter(o => o.status === 'received');
+    const totalReceived = stats?.completed_orders ?? completedOrders.length;
+    const recentReceived = completedOrders.filter(o => sevenDaysAgo > 0 && new Date(o.created_at).getTime() >= sevenDaysAgo);
+    const receivedMetric = calcDiff(totalReceived, recentReceived.length, true);
+
+    // 5. Procurement Value
+    const totalValue = stats?.total_procurement_value ?? orders.reduce((sum, o) => sum + (Number(o.total_amount) || 0), 0);
+    const recentValue = recentOrders.reduce((sum, o) => sum + (Number(o.total_amount) || 0), 0);
+    const valueMetric = calcDiff(totalValue, recentValue, true);
+
+    return {
+      total: { value: totalOrders, ...totalMetric },
+      drafts: { value: totalDrafts, ...draftsMetric },
+      pending: { value: totalPending, ...pendingMetric },
+      received: { value: totalReceived, ...receivedMetric },
+      procurementValue: { value: totalValue, ...valueMetric },
+    };
+  }, [orders, stats, currentTime]);
 
   // Alerts
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -182,8 +253,8 @@ export default function PurchaseOrdersPage() {
       if (res.data && res.data.orders) {
         setOrders(res.data.orders);
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to fetch purchase orders');
+    } catch (err: unknown) {
+      setErrorMsg((err as Error).message || 'Failed to fetch purchase orders');
     }
   }, [statusFilter, warehouseFilter, searchQuery]);
 
@@ -206,30 +277,37 @@ export default function PurchaseOrdersPage() {
       if (res.data) {
         setSuppliers(res.data);
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to fetch suppliers');
+    } catch (err: unknown) {
+      setErrorMsg((err as Error).message || 'Failed to fetch suppliers');
     }
   }, []);
 
   // Initial Load
   useEffect(() => {
+    let mounted = true;
     const init = async () => {
       setIsLoading(true);
-      await Promise.all([loadMetadata(), fetchOrders(), fetchStats()]);
-      setIsLoading(false);
+      await Promise.all([loadMetadata(), fetchStats()]);
+      if (mounted) setIsLoading(false);
     };
-    init();
-  }, [loadMetadata, fetchOrders, fetchStats]);
+    const timer = setTimeout(() => void init(), 0);
+    return () => {
+      mounted = false;
+      clearTimeout(timer);
+    };
+  }, [loadMetadata, fetchStats]);
 
   // Refetch when filters change
   useEffect(() => {
-    fetchOrders();
+    const timer = setTimeout(() => void fetchOrders(), 0);
+    return () => clearTimeout(timer);
   }, [fetchOrders]);
 
   // Real-time auto-refresh across browsers
   useEffect(() => {
-    const handleSync = (e: any) => {
-      const resource = e?.detail?.resource;
+    const handleSync = (e: Event) => {
+      const customEvent = e as CustomEvent<{ resource?: string }>;
+      const resource = customEvent?.detail?.resource;
       if (
         !resource ||
         resource === 'purchase_orders' ||
@@ -250,7 +328,8 @@ export default function PurchaseOrdersPage() {
   // Pre-fetch locations whenever poWarehouseId changes in create modal
   useEffect(() => {
     if (poWarehouseId) {
-      fetchLocationsForWh(poWarehouseId);
+      const timer = setTimeout(() => void fetchLocationsForWh(poWarehouseId), 0);
+      return () => clearTimeout(timer);
     }
   }, [poWarehouseId, fetchLocationsForWh]);
 
@@ -313,7 +392,7 @@ export default function PurchaseOrdersPage() {
   };
 
   // Update line item in Create PO
-  const updateLineItem = (index: number, field: keyof FormLineItem, val: any) => {
+  const updateLineItem = (index: number, field: keyof FormLineItem, val: FormLineItem[keyof FormLineItem]) => {
     setPoItems((prev) => {
       const updated = [...prev];
       const item = { ...updated[index], [field]: val };
@@ -349,8 +428,9 @@ export default function PurchaseOrdersPage() {
   const calculatedTotalQuantity = useMemo(() => {
     return poItems.reduce((acc, item) => {
       const qty = typeof item.quantity_ordered === 'number' ? item.quantity_ordered : 0;
-      return acc + qty;
+      return sum(qty);
     }, 0);
+    function sum(qty: number) { return qty; }
   }, [poItems]);
 
   // Submit Create PO
@@ -412,8 +492,8 @@ export default function PurchaseOrdersPage() {
         setShowCreatePOModal(false);
         await Promise.all([fetchOrders(), fetchStats()]);
       }
-    } catch (err: any) {
-      setModalError(err.message || 'Failed to create purchase order');
+    } catch (err: unknown) {
+      setModalError((err as Error).message || 'Failed to create purchase order');
     } finally {
       setIsSubmitting(false);
     }
@@ -435,8 +515,8 @@ export default function PurchaseOrdersPage() {
         }
         await Promise.all([fetchOrders(), fetchStats()]);
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to update order status');
+    } catch (err: unknown) {
+      setErrorMsg((err as Error).message || 'Failed to update order status');
     } finally {
       setIsSubmitting(false);
     }
@@ -458,8 +538,8 @@ export default function PurchaseOrdersPage() {
         }
         await Promise.all([fetchOrders(), fetchStats()]);
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to cancel purchase order');
+    } catch (err: unknown) {
+      setErrorMsg((err as Error).message || 'Failed to cancel purchase order');
     } finally {
       setIsSubmitting(false);
     }
@@ -497,7 +577,7 @@ export default function PurchaseOrdersPage() {
   };
 
   // Update line item in Receive Modal
-  const updateReceiveItem = (index: number, field: keyof FormReceiveItem, val: any) => {
+  const updateReceiveItem = (index: number, field: keyof FormReceiveItem, val: FormReceiveItem[keyof FormReceiveItem]) => {
     setReceiveItems((prev) => {
       const updated = [...prev];
       updated[index] = { ...updated[index], [field]: val };
@@ -553,8 +633,8 @@ export default function PurchaseOrdersPage() {
         setSelectedPO(null);
         await Promise.all([fetchOrders(), fetchStats()]);
       }
-    } catch (err: any) {
-      setModalError(err.message || 'Failed to receive goods');
+    } catch (err: unknown) {
+      setModalError((err as Error).message || 'Failed to receive goods');
     } finally {
       setIsSubmitting(false);
     }
@@ -573,7 +653,7 @@ export default function PurchaseOrdersPage() {
       setSupAddress(supplier.address);
     } else {
       setEditingSupplier(null);
-      setSupCode('SUP-' + Math.floor(100 + Math.random() * 900));
+      setSupCode(generateSupplierCode());
       setSupName('');
       setSupContact('');
       setSupEmail('');
@@ -614,8 +694,8 @@ export default function PurchaseOrdersPage() {
 
       setShowSupplierModal(false);
       await Promise.all([fetchSuppliers(), loadMetadata()]);
-    } catch (err: any) {
-      setModalError(err.message || 'Failed to save supplier');
+    } catch (err: unknown) {
+      setModalError((err as Error).message || 'Failed to save supplier');
     } finally {
       setIsSubmitting(false);
     }
@@ -633,8 +713,8 @@ export default function PurchaseOrdersPage() {
         );
       case 'ordered':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#F4F3FF] dark:bg-[#7C6EF0]/15 text-[#6C5CE7] dark:text-[#A594FD] border border-[#E0DCFC] dark:border-[#7C6EF0]/30">
-            <Truck className="w-3 h-3 text-[#7C6EF0]" />
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#0B3333]/10 dark:bg-[#0B3333]/30 text-[#0B3333] dark:text-[#2dd4bf] border border-[#0B3333]/20 dark:border-[#2dd4bf]/30">
+            <Truck className="w-3 h-3 text-[#0B3333] dark:text-[#2dd4bf]" />
             {language === 'id' ? 'Dipesan' : 'Ordered'}
           </span>
         );
@@ -670,10 +750,10 @@ export default function PurchaseOrdersPage() {
         {/* Page Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#1B1B1F] dark:text-white">
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-white">
               {t('poTitle')}
             </h1>
-            <p className="text-sm text-[#8B8B99] dark:text-slate-400 mt-1">
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
               {t('poSubtitle')}
             </p>
           </div>
@@ -681,14 +761,14 @@ export default function PurchaseOrdersPage() {
           <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
             <button
               onClick={() => openSupplierModal()}
-              className="inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-full border border-[#EEEDF5] dark:border-slate-700 bg-white dark:bg-slate-800 text-xs sm:text-sm font-semibold text-[#1B1B1F] dark:text-white hover:border-[#7C6EF0] hover:text-[#7C6EF0] transition-colors shadow-xs cursor-pointer"
+              className="inline-flex items-center gap-1.5 sm:gap-2 px-3.5 sm:px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:border-[#0B3333] hover:text-[#0B3333] dark:hover:border-[#2dd4bf] dark:hover:text-[#2dd4bf] transition-colors shadow-2xs cursor-pointer"
             >
-              <Building2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[1.8] text-[#8B8B99] dark:text-slate-400" />
+              <Building2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[1.8] text-slate-400" />
               <span>{t('newSupplierBtn')}</span>
             </button>
             <button
               onClick={() => openCreatePO()}
-              className="inline-flex items-center gap-1.5 sm:gap-2 px-3.5 sm:px-4 py-2 rounded-full bg-[#7C6EF0] text-white text-xs sm:text-sm font-semibold hover:bg-[#6C5CE7] transition-all shadow-sm shadow-[#7C6EF0]/20 cursor-pointer"
+              className="inline-flex items-center gap-1.5 sm:gap-2 px-3.5 sm:px-4 py-2 rounded-xl bg-[#0B3333] text-white text-xs sm:text-sm font-semibold hover:bg-[#082626] transition-all shadow-xs cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" />
               <span>{t('createPOBtn')}</span>
@@ -710,91 +790,172 @@ export default function PurchaseOrdersPage() {
 
         {/* Top Metric Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 sm:gap-4">
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-            <div className="flex items-center justify-between">
+          {/* Card 1: TOTAL POs (Core Metric) */}
+          <div className={`bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col justify-between ${
+            !showAllMetrics ? 'sm:col-span-2 lg:col-span-1' : ''
+          }`}>
+            <div>
               <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('total')} {t('tabPurchaseOrders')}</span>
-              <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center">
-                <FileText className="w-4 h-4" />
+            </div>
+            <div className="mt-2">
+              <p className="text-2xl font-extrabold text-slate-900 dark:text-slate-100 tabular-nums font-sans">
+                {poMetrics.total.value.toLocaleString('id-ID')}
+              </p>
+              <div className="flex items-center gap-1.5 mt-2">
+                <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold ${
+                  poMetrics.total.isPositive
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
+                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
+                }`}>
+                  {poMetrics.total.isPositive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                  {poMetrics.total.change}
+                </span>
+                <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                  {language === 'id' ? '7 hari terakhir' : 'Last 7 days'}
+                </span>
               </div>
             </div>
-            <p className="text-2xl font-bold text-slate-900 dark:text-slate-100 mt-2">
-              {stats ? stats.total_orders : '—'}
-            </p>
-            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
-              {language === 'id' ? 'Seluruh riwayat PO' : 'All historical POs'}
-            </p>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-            <div className="flex items-center justify-between">
+          {/* Card 2: DRAFTS */}
+          <div className={`bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col justify-between ${
+            !showAllMetrics ? 'hidden lg:flex' : 'flex'
+          }`}>
+            <div>
               <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('kpiDrafts')}</span>
-              <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 flex items-center justify-center">
-                <Clock className="w-4 h-4" />
+            </div>
+            <div className="mt-2">
+              <p className="text-2xl font-extrabold text-slate-900 dark:text-slate-100 tabular-nums font-sans">
+                {poMetrics.drafts.value.toLocaleString('id-ID')}
+              </p>
+              <div className="flex items-center gap-1.5 mt-2">
+                <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold ${
+                  poMetrics.drafts.isPositive
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
+                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
+                }`}>
+                  {poMetrics.drafts.isPositive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                  {poMetrics.drafts.change}
+                </span>
+                <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                  {language === 'id' ? '7 hari terakhir' : 'Last 7 days'}
+                </span>
               </div>
             </div>
-            <p className="text-2xl font-bold text-slate-900 dark:text-slate-100 mt-2">
-              {stats ? stats.draft_orders : '—'}
-            </p>
-            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
-              {language === 'id' ? 'Menunggu pengiriman' : 'Pending submission'}
-            </p>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-            <div className="flex items-center justify-between">
+          {/* Card 3: PENDING INTAKE */}
+          <div className={`bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col justify-between ${
+            !showAllMetrics ? 'hidden lg:flex' : 'flex'
+          }`}>
+            <div>
               <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('kpiPendingIntake')}</span>
-              <div className="w-8 h-8 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 flex items-center justify-center">
-                <Truck className="w-4 h-4" />
+            </div>
+            <div className="mt-2">
+              <p className="text-2xl font-extrabold text-slate-900 dark:text-slate-100 tabular-nums font-sans">
+                {poMetrics.pending.value.toLocaleString('id-ID')}
+              </p>
+              <div className="flex items-center gap-1.5 mt-2">
+                <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold ${
+                  poMetrics.pending.isPositive
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
+                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
+                }`}>
+                  {poMetrics.pending.isPositive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                  {poMetrics.pending.change}
+                </span>
+                <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                  {language === 'id' ? '7 hari terakhir' : 'Last 7 days'}
+                </span>
               </div>
             </div>
-            <p className="text-2xl font-bold text-slate-900 dark:text-slate-100 mt-2">
-              {stats ? stats.pending_orders : '—'}
-            </p>
-            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
-              {language === 'id' ? 'Menunggu kedatangan' : 'Awaiting delivery'}
-            </p>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-            <div className="flex items-center justify-between">
+          {/* Card 4: RECEIVED */}
+          <div className={`bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col justify-between ${
+            !showAllMetrics ? 'hidden lg:flex' : 'flex'
+          }`}>
+            <div>
               <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('kpiReceived')}</span>
-              <div className="w-8 h-8 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-                <CheckCircle2 className="w-4 h-4" />
+            </div>
+            <div className="mt-2">
+              <p className="text-2xl font-extrabold text-slate-900 dark:text-slate-100 tabular-nums font-sans">
+                {poMetrics.received.value.toLocaleString('id-ID')}
+              </p>
+              <div className="flex items-center gap-1.5 mt-2">
+                <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold ${
+                  poMetrics.received.isPositive
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
+                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
+                }`}>
+                  {poMetrics.received.isPositive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                  {poMetrics.received.change}
+                </span>
+                <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                  {language === 'id' ? '7 hari terakhir' : 'Last 7 days'}
+                </span>
               </div>
             </div>
-            <p className="text-2xl font-bold text-slate-900 dark:text-slate-100 mt-2">
-              {stats ? stats.completed_orders : '—'}
-            </p>
-            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
-              {language === 'id' ? 'Selesai diterima' : 'Fully fulfilled'}
-            </p>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-            <div className="flex items-center justify-between">
+          {/* Card 5: PROCUREMENT VALUE */}
+          <div className={`bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col justify-between ${
+            !showAllMetrics ? 'hidden lg:flex' : 'col-span-1 sm:col-span-2 md:col-span-1 flex'
+          }`}>
+            <div>
               <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('kpiProcurementValue')}</span>
-              <div className="w-8 h-8 rounded-full bg-[#F4F3FF] dark:bg-[#7C6EF0]/15 text-[#7C6EF0] dark:text-[#A594FD] flex items-center justify-center">
-                <DollarSign className="w-4 h-4" />
+            </div>
+            <div className="mt-2">
+              <p className="text-xl font-extrabold text-slate-900 dark:text-slate-100 truncate tabular-nums font-sans">
+                Rp {poMetrics.procurementValue.value.toLocaleString('id-ID')}
+              </p>
+              <div className="flex items-center gap-1.5 mt-2">
+                <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold ${
+                  poMetrics.procurementValue.isPositive
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
+                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
+                }`}>
+                  {poMetrics.procurementValue.isPositive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                  {poMetrics.procurementValue.change}
+                </span>
+                <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                  {language === 'id' ? '7 hari terakhir' : 'Last 7 days'}
+                </span>
               </div>
             </div>
-            <p className="text-xl font-bold text-slate-900 dark:text-slate-100 mt-2 truncate">
-              {stats ? `Rp ${stats.total_procurement_value.toLocaleString('id-ID')}` : '—'}
-            </p>
-            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
-              {language === 'id' ? 'Komitmen nilai PO' : 'Total PO commitment'}
-            </p>
           </div>
         </div>
 
+        {/* Responsive Toggle for Metric Cards */}
+        <div className="lg:hidden">
+          <button
+            type="button"
+            onClick={() => setShowAllMetrics((prev) => !prev)}
+            aria-expanded={showAllMetrics}
+            className="w-full py-2.5 px-4 rounded-xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60 shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            <span>
+              {showAllMetrics
+                ? (language === 'id' ? 'Sembunyikan metrik' : 'Show less metrics')
+                : (language === 'id' ? 'Lihat 4 metrik lainnya' : 'Show 4 more metrics')}
+            </span>
+            {showAllMetrics ? (
+              <ChevronUp className="w-3.5 h-3.5 stroke-[2]" />
+            ) : (
+              <ChevronDown className="w-3.5 h-3.5 stroke-[2]" />
+            )}
+          </button>
+        </div>
+
         {/* Main Content Card with Navigation Tabs */}
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden">
           {/* Tabs Bar */}
           <div className="flex border-b border-slate-200 dark:border-slate-800 px-6 pt-4 gap-8">
             <button
               onClick={() => setActiveTab('orders')}
               className={`pb-4 text-sm font-semibold flex items-center gap-2 border-b-2 transition-all ${
                 activeTab === 'orders'
-                  ? 'border-[#7C6EF0] text-[#7C6EF0] dark:border-[#9B8DFC] dark:text-[#9B8DFC]'
+                  ? 'border-[#0B3333] text-[#0B3333] dark:border-[#2dd4bf] dark:text-[#2dd4bf]'
                   : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
               }`}
             >
@@ -809,7 +970,7 @@ export default function PurchaseOrdersPage() {
               onClick={() => setActiveTab('suppliers')}
               className={`pb-4 text-sm font-semibold flex items-center gap-2 border-b-2 transition-all ${
                 activeTab === 'suppliers'
-                  ? 'border-[#7C6EF0] text-[#7C6EF0] dark:border-[#9B8DFC] dark:text-[#9B8DFC]'
+                  ? 'border-[#0B3333] text-[#0B3333] dark:border-[#2dd4bf] dark:text-[#2dd4bf]'
                   : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
               }`}
             >
@@ -951,7 +1112,7 @@ export default function PurchaseOrdersPage() {
                     </p>
                     <button
                       onClick={() => openCreatePO()}
-                      className="mt-4 inline-flex items-center px-3.5 py-2 text-xs font-semibold rounded-xl bg-[#7C6EF0] text-white hover:bg-[#6C5CE7] transition-colors"
+                      className="mt-4 inline-flex items-center px-3.5 py-2 text-xs font-semibold rounded-xl bg-[#0B3333] text-white hover:bg-[#082626] transition-colors"
                     >
                       <Plus className="w-3.5 h-3.5 mr-1" />
                       {language === 'id' ? 'Buat Pesanan Pembelian Pertama' : 'Create First Purchase Order'}
@@ -984,7 +1145,7 @@ export default function PurchaseOrdersPage() {
                             {/* Order Details */}
                             <td className="py-3.5 px-4">
                               <div className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                                <span className="font-mono text-sm text-[#7C6EF0] dark:text-[#A594FD] font-semibold">
+                                <span className="font-mono text-sm text-[#0B3333] dark:text-[#2dd4bf] font-semibold">
                                   {po.order_number}
                                 </span>
                               </div>
@@ -1070,7 +1231,7 @@ export default function PurchaseOrdersPage() {
                                     <button
                                       onClick={() => handleMarkOrdered(po)}
                                       title={language === 'id' ? 'Tandai Dipesan (Kirim ke Pemasok)' : 'Mark as Ordered (Send to Supplier)'}
-                                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-[#F4F3FF] hover:bg-[#EAE8FE] text-[#6C5CE7] dark:bg-[#7C6EF0]/15 dark:hover:bg-[#7C6EF0]/25 dark:text-[#A594FD] border border-[#E0DCFC] dark:border-[#7C6EF0]/30 transition-colors shadow-2xs"
+                                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-[#0B3333]/10 hover:bg-[#0B3333]/20 text-[#0B3333] dark:text-[#2dd4bf] border border-[#0B3333]/20 dark:border-[#2dd4bf]/30 transition-colors shadow-2xs"
                                     >
                                       <Send className="w-3.5 h-3.5" />
                                       {language === 'id' ? 'Pesan' : 'Order'}
@@ -1090,7 +1251,7 @@ export default function PurchaseOrdersPage() {
                                     <button
                                       onClick={() => openReceiveModal(po)}
                                       title={language === 'id' ? 'Terima Barang & Isi Ulang Stok' : 'Receive Goods & Restock Inventory'}
-                                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-[#7C6EF0] text-white hover:bg-[#6C5CE7] transition-colors shadow-xs"
+                                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-[#0B3333] text-white hover:bg-[#082626] transition-colors shadow-xs"
                                     >
                                       <ArrowDownLeft className="w-3.5 h-3.5" />
                                       {language === 'id' ? 'Terima' : 'Receive'}
@@ -1128,7 +1289,7 @@ export default function PurchaseOrdersPage() {
                     placeholder={language === 'id' ? 'Cari berdasarkan nama pemasok, kode, kontak...' : 'Search by supplier name, code, contact...'}
                     value={supplierSearchQuery}
                     onChange={(e) => setSupplierSearchQuery(e.target.value)}
-                    className="w-full pl-9 pr-4 py-1.5 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 dark:text-slate-100"
+                    className="w-full pl-9 pr-4 py-1.5 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] text-slate-900 dark:text-slate-100"
                   />
                   {supplierSearchQuery && (
                     <button
@@ -1142,7 +1303,7 @@ export default function PurchaseOrdersPage() {
 
                 <button
                   onClick={() => openSupplierModal()}
-                  className="inline-flex items-center px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-[#7C6EF0] text-white hover:bg-[#6C5CE7] transition-colors"
+                  className="inline-flex items-center px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-[#0B3333] text-white hover:bg-[#082626] transition-colors"
                 >
                   <Plus className="w-3.5 h-3.5 mr-1" />
                   {language === 'id' ? 'Daftarkan Pemasok' : 'Register Supplier'}
@@ -1290,7 +1451,7 @@ export default function PurchaseOrdersPage() {
                     <select
                       value={poSupplierId}
                       onChange={(e) => setPoSupplierId(e.target.value)}
-                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                       required
                     >
                       {suppliers.length === 0 ? (
@@ -1314,7 +1475,7 @@ export default function PurchaseOrdersPage() {
                     <select
                       value={poWarehouseId}
                       onChange={(e) => setPoWarehouseId(e.target.value)}
-                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                       required
                     >
                       {warehouses.map((w) => (
@@ -1336,7 +1497,7 @@ export default function PurchaseOrdersPage() {
                       type="date"
                       value={poExpectedDate}
                       onChange={(e) => setPoExpectedDate(e.target.value)}
-                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     />
                   </div>
 
@@ -1349,7 +1510,7 @@ export default function PurchaseOrdersPage() {
                       placeholder={language === 'id' ? 'misal: Stok Ulang Q3, ref kontrak #123' : 'e.g. Q3 Restock, contract ref #123'}
                       value={poNotes}
                       onChange={(e) => setPoNotes(e.target.value)}
-                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     />
                   </div>
                 </div>
@@ -1363,7 +1524,7 @@ export default function PurchaseOrdersPage() {
                     <button
                       type="button"
                       onClick={addLineItem}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#7C6EF0] dark:text-[#9B8FF3] bg-[#7C6EF0]/10 hover:bg-[#7C6EF0]/20 rounded-xl transition-colors cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#0B3333] dark:text-[#2dd4bf] bg-[#0B3333]/10 hover:bg-[#0B3333]/20 rounded-xl transition-colors cursor-pointer"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>{language === 'id' ? 'Tambah Item' : 'Add Item'}</span>
@@ -1380,7 +1541,7 @@ export default function PurchaseOrdersPage() {
                       return (
                         <div
                           key={index}
-                          className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-[#EEEDF5] dark:border-slate-800 shadow-2xs grid grid-cols-1 md:grid-cols-12 gap-3 items-start text-xs"
+                          className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs grid grid-cols-1 md:grid-cols-12 gap-3 items-start text-xs"
                         >
                           {/* Product select */}
                           <div className="md:col-span-5">
@@ -1390,7 +1551,7 @@ export default function PurchaseOrdersPage() {
                             <select
                               value={item.product_id}
                               onChange={(e) => updateLineItem(index, 'product_id', e.target.value)}
-                              className="w-full h-10 px-3 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                              className="w-full h-10 px-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                               required
                             >
                               {products.map((p) => (
@@ -1405,7 +1566,7 @@ export default function PurchaseOrdersPage() {
                               <select
                                 value={item.variant_id || ''}
                                 onChange={(e) => updateLineItem(index, 'variant_id', e.target.value)}
-                                className="w-full mt-2 h-9 px-3 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white"
+                                className="w-full mt-2 h-9 px-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white"
                               >
                                 <option value="">{language === 'id' ? 'Varian Standar' : 'Standard Variant'}</option>
                                 {selectedProd.variants.map((v) => (
@@ -1434,7 +1595,7 @@ export default function PurchaseOrdersPage() {
                                   e.target.value === '' ? '' : Number(e.target.value)
                                 )
                               }
-                              className="w-full h-10 px-3 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] font-mono transition-colors"
+                              className="w-full h-10 px-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] font-mono transition-colors"
                               required
                             />
                           </div>
@@ -1457,7 +1618,7 @@ export default function PurchaseOrdersPage() {
                                   e.target.value === '' ? '' : Number(e.target.value)
                                 )
                               }
-                              className="w-full h-10 px-3 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] font-mono transition-colors"
+                              className="w-full h-10 px-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] font-mono transition-colors"
                               required
                             />
                           </div>
@@ -1490,18 +1651,18 @@ export default function PurchaseOrdersPage() {
                 </div>
 
                 {/* Grand Total Bar */}
-                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-[#EEEDF5] dark:border-slate-700 flex items-center justify-between text-xs">
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs">
                   <div>
                     <span className="text-slate-500 dark:text-slate-400">
                       {language === 'id' ? 'Total Kuantitas Dipesan: ' : 'Total Ordered Quantity: '}
                     </span>
-                    <strong className="text-slate-900 dark:text-slate-100">{calculatedTotalQuantity} unit</strong>
+                    <strong className="text-slate-900 dark:text-slate-100 font-mono ml-1">{calculatedTotalQuantity} unit</strong>
                   </div>
                   <div className="text-right">
                     <span className="text-slate-500 dark:text-slate-400">
                       {language === 'id' ? 'Total Nilai Keseluruhan: ' : 'Grand Total Value: '}
                     </span>
-                    <strong className="text-base text-[#7C6EF0] dark:text-[#9B8FF3] font-bold ml-1">
+                    <strong className="text-base font-mono text-[#0B3333] dark:text-[#2dd4bf] font-bold ml-1">
                       Rp {calculatedGrandTotal.toLocaleString('id-ID')}
                     </strong>
                   </div>
@@ -1512,14 +1673,14 @@ export default function PurchaseOrdersPage() {
                   <button
                     type="button"
                     onClick={() => setShowCreatePOModal(false)}
-                    className="px-5 py-2.5 text-sm font-semibold rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                    className="px-5 py-2.5 text-sm font-semibold rounded-xl text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                   >
                     {language === 'id' ? 'Batal' : 'Cancel'}
                   </button>
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-[#7C6EF0] hover:bg-[#6C5CE7] text-white font-semibold text-sm transition-all shadow-sm shadow-[#7C6EF0]/20 cursor-pointer disabled:opacity-50"
+                    className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-[#0B3333] hover:bg-[#082626] text-white font-semibold text-sm transition-all shadow-xs cursor-pointer disabled:opacity-50"
                   >
                     {isSubmitting ? (
                       <>
@@ -1752,7 +1913,7 @@ export default function PurchaseOrdersPage() {
                     placeholder={language === 'id' ? 'misal: SJ-2026/09/1089 atau Nama Supir' : 'e.g. SJ-2026/09/1089 or Driver name'}
                     value={receiveNotes}
                     onChange={(e) => setReceiveNotes(e.target.value)}
-                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                   />
                 </div>
 
@@ -1768,13 +1929,13 @@ export default function PurchaseOrdersPage() {
                       return (
                         <div
                           key={index}
-                          className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-[#EEEDF5] dark:border-slate-800 shadow-2xs grid grid-cols-1 md:grid-cols-12 gap-3 items-start text-xs"
+                          className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs grid grid-cols-1 md:grid-cols-12 gap-3 items-start text-xs"
                         >
                           <div className="md:col-span-5">
                             <div className="font-semibold text-sm text-slate-800 dark:text-slate-200">{item.product_name}</div>
                             <div className="flex items-center gap-2 mt-1 text-xs text-slate-500 dark:text-slate-400">
                               <span className="font-mono">{item.sku}</span>
-                              <span>• {language === 'id' ? 'Sisa Maks: ' : 'Max Remaining: '}<strong className="text-amber-600 dark:text-amber-400">{item.max_allowed} {item.unit}</strong></span>
+                              <span>• {language === 'id' ? 'Sisa Maks: ' : 'Max Remaining: '}<strong className="text-amber-600 dark:text-amber-400 font-mono">{item.max_allowed} {item.unit}</strong></span>
                             </div>
                           </div>
 
@@ -1786,7 +1947,7 @@ export default function PurchaseOrdersPage() {
                             <select
                               value={item.location_id}
                               onChange={(e) => updateReceiveItem(index, 'location_id', e.target.value)}
-                              className="w-full h-10 px-3 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] focus:outline-none transition-colors"
+                              className="w-full h-10 px-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] focus:outline-none transition-colors"
                               required
                             >
                               {whLocs.length === 0 ? (
@@ -1819,7 +1980,7 @@ export default function PurchaseOrdersPage() {
                                   e.target.value === '' ? '' : Number(e.target.value)
                                 )
                               }
-                              className="w-full h-10 px-3 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] focus:outline-none font-mono transition-colors"
+                              className="w-full h-10 px-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] focus:outline-none font-mono transition-colors"
                               required
                             />
                           </div>
@@ -1833,14 +1994,14 @@ export default function PurchaseOrdersPage() {
                   <button
                     type="button"
                     onClick={() => setShowReceiveModal(false)}
-                    className="px-5 py-2.5 text-sm font-semibold rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                    className="px-5 py-2.5 text-sm font-semibold rounded-xl text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                   >
                     {language === 'id' ? 'Batal' : 'Cancel'}
                   </button>
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-[#7C6EF0] hover:bg-[#6C5CE7] text-white font-semibold text-sm transition-all shadow-sm shadow-[#7C6EF0]/20 cursor-pointer disabled:opacity-50"
+                    className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-[#0B3333] hover:bg-[#082626] text-white font-semibold text-sm transition-all shadow-xs cursor-pointer disabled:opacity-50"
                   >
                     {isSubmitting ? (
                       <>
@@ -1860,7 +2021,7 @@ export default function PurchaseOrdersPage() {
         {/* MODAL 4: CREATE / EDIT SUPPLIER */}
         {showSupplierModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
-            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-6 my-8 animate-in fade-in zoom-in-95">
+            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-6 my-8 animate-in fade-in zoom-in-95">
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
                 <h3 className="text-lg font-bold text-slate-900 dark:text-white">
                   {editingSupplier
@@ -1893,7 +2054,7 @@ export default function PurchaseOrdersPage() {
                     placeholder={language === 'id' ? 'misal: SUP-001' : 'e.g. SUP-001'}
                     value={supCode}
                     onChange={(e) => setSupCode(e.target.value)}
-                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] font-mono text-xs uppercase transition-colors"
+                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] font-mono text-xs uppercase transition-colors"
                   />
                 </div>
 
@@ -1906,7 +2067,7 @@ export default function PurchaseOrdersPage() {
                     placeholder={language === 'id' ? 'misal: PT Global Logistik Makmur' : 'e.g. PT Global Logistik Makmur'}
                     value={supName}
                     onChange={(e) => setSupName(e.target.value)}
-                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     required
                   />
                 </div>
@@ -1920,7 +2081,7 @@ export default function PurchaseOrdersPage() {
                     placeholder={language === 'id' ? 'misal: Budi Santoso' : 'e.g. Budi Santoso'}
                     value={supContact}
                     onChange={(e) => setSupContact(e.target.value)}
-                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                   />
                 </div>
 
@@ -1932,7 +2093,7 @@ export default function PurchaseOrdersPage() {
                       placeholder="sales@supplier.com"
                       value={supEmail}
                       onChange={(e) => setSupEmail(e.target.value)}
-                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     />
                   </div>
 
@@ -1945,7 +2106,7 @@ export default function PurchaseOrdersPage() {
                       placeholder="0812-3456-7890"
                       value={supPhone}
                       onChange={(e) => setSupPhone(e.target.value)}
-                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     />
                   </div>
                 </div>
@@ -1959,7 +2120,7 @@ export default function PurchaseOrdersPage() {
                     placeholder={language === 'id' ? 'Alamat Kantor / Pergudangan' : 'Office / Warehouse address'}
                     value={supAddress}
                     onChange={(e) => setSupAddress(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] resize-none transition-colors"
+                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] resize-none transition-colors"
                   />
                 </div>
 
@@ -1967,14 +2128,14 @@ export default function PurchaseOrdersPage() {
                   <button
                     type="button"
                     onClick={() => setShowSupplierModal(false)}
-                    className="px-5 py-2.5 text-sm font-semibold rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                    className="px-5 py-2.5 text-sm font-semibold rounded-xl text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                   >
                     {language === 'id' ? 'Batal' : 'Cancel'}
                   </button>
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-[#7C6EF0] hover:bg-[#6C5CE7] text-white font-semibold text-sm transition-all shadow-sm shadow-[#7C6EF0]/20 cursor-pointer disabled:opacity-50"
+                    className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-[#0B3333] hover:bg-[#082626] text-white font-semibold text-sm transition-all shadow-xs cursor-pointer disabled:opacity-50"
                   >
                     {isSubmitting ? (
                       <>

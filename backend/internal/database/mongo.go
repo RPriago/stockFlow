@@ -66,6 +66,17 @@ func (m *MongoDB) EnsureIndexes(ctx context.Context) error {
 		log.Printf("Warning: failed to create unique index on products.sku: %v\n", err)
 	}
 
+	// PERF-003: Compound index on products (is_deleted, created_at) for efficient pagination and sorting
+	_, err = prodColl.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "is_deleted", Value: 1},
+			{Key: "created_at", Value: -1},
+		},
+	})
+	if err != nil {
+		log.Printf("Warning: failed to create compound index on products: %v\n", err)
+	}
+
 	// Unique index on categories.slug
 	catColl := m.Database.Collection("categories")
 	_, err = catColl.Indexes().CreateOne(ctx, mongo.IndexModel{
@@ -111,6 +122,17 @@ func (m *MongoDB) EnsureIndexes(ctx context.Context) error {
 		log.Printf("Warning: failed to create compound index on inventory_items: %v\n", err)
 	}
 
+	// PERF-003: Compound index on inventory_items (warehouse_id, product_name) for warehouse filtering and sorting
+	_, err = invColl.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "warehouse_id", Value: 1},
+			{Key: "product_name", Value: 1},
+		},
+	})
+	if err != nil {
+		log.Printf("Warning: failed to create compound index on inventory_items (warehouse_id, product_name): %v\n", err)
+	}
+
 	// Index on inventory_movements (warehouse_id, created_at)
 	movColl := m.Database.Collection("inventory_movements")
 	_, err = movColl.Indexes().CreateOne(ctx, mongo.IndexModel{
@@ -143,6 +165,18 @@ func (m *MongoDB) EnsureIndexes(ctx context.Context) error {
 		log.Printf("Warning: failed to create unique index on purchase_orders.order_number: %v\n", err)
 	}
 
+	// PERF-003: Compound index on purchase_orders (warehouse_id, status, created_at) for filtered pagination
+	_, err = poColl.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "warehouse_id", Value: 1},
+			{Key: "status", Value: 1},
+			{Key: "created_at", Value: -1},
+		},
+	})
+	if err != nil {
+		log.Printf("Warning: failed to create compound index on purchase_orders: %v\n", err)
+	}
+
 	// Unique index on customers.code
 	custColl := m.Database.Collection("customers")
 	_, err = custColl.Indexes().CreateOne(ctx, mongo.IndexModel{
@@ -163,6 +197,18 @@ func (m *MongoDB) EnsureIndexes(ctx context.Context) error {
 		log.Printf("Warning: failed to create unique index on sales_orders.order_number: %v\n", err)
 	}
 
+	// PERF-003: Compound index on sales_orders (warehouse_id, status, created_at) for filtered pagination
+	_, err = soColl.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "warehouse_id", Value: 1},
+			{Key: "status", Value: 1},
+			{Key: "created_at", Value: -1},
+		},
+	})
+	if err != nil {
+		log.Printf("Warning: failed to create compound index on sales_orders: %v\n", err)
+	}
+
 	// TTL index on notifications.expires_at (expireAfterSeconds: 0) for automatic 3x24h (72h) expiration
 	notifColl := m.Database.Collection("notifications")
 	_, err = notifColl.Indexes().CreateOne(ctx, mongo.IndexModel{
@@ -179,9 +225,4 @@ func (m *MongoDB) EnsureIndexes(ctx context.Context) error {
 
 func (m *MongoDB) Disconnect(ctx context.Context) error {
 	return m.Client.Disconnect(ctx)
-}
-
-// PurgeDummyData is disabled to ensure data is permanently retained.
-func (m *MongoDB) PurgeDummyData(ctx context.Context) error {
-	return nil
 }

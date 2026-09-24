@@ -6,9 +6,8 @@ import FloatingToast from '@/components/FloatingToast';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { Warehouse, Location, LocationType } from '@/types/warehouse';
-import { api, ApiError } from '@/lib/api';
+import { api } from '@/lib/api';
 import {
-  Warehouse as WarehouseIcon,
   Plus,
   MapPin,
   Layers,
@@ -16,15 +15,12 @@ import {
   Trash2,
   Edit2,
   Boxes,
-  CheckCircle2,
-  AlertTriangle,
   X,
   Loader2,
   Sparkles,
   ThermometerSnowflake,
   PackageCheck,
   Building2,
-  ArrowRight,
 } from 'lucide-react';
 
 export default function WarehousesPage() {
@@ -81,8 +77,8 @@ export default function WarehousesPage() {
       if (res.success && res.data) {
         setWarehouses(res.data || []);
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to fetch warehouses');
+    } catch (err: unknown) {
+      setErrorMsg((err as Error).message || 'Failed to fetch warehouses');
     } finally {
       setIsLoadingWh(false);
     }
@@ -108,7 +104,7 @@ export default function WarehousesPage() {
         }
         setBinOccupancy(occMap);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to fetch locations:', err);
     } finally {
       setIsLoadingLoc(false);
@@ -116,19 +112,23 @@ export default function WarehousesPage() {
   }, []);
 
   useEffect(() => {
-    fetchWarehouses();
+    const timer = setTimeout(() => void fetchWarehouses(), 0);
+    return () => clearTimeout(timer);
   }, [fetchWarehouses]);
 
   useEffect(() => {
     if (selectedWarehouse?.id) {
-      fetchLocations(selectedWarehouse.id);
+      const whId = selectedWarehouse.id;
+      const timer = setTimeout(() => void fetchLocations(whId), 0);
+      return () => clearTimeout(timer);
     }
   }, [selectedWarehouse?.id, fetchLocations]);
 
   // Real-time auto-refresh across browsers
   useEffect(() => {
-    const handleSync = (e: any) => {
-      const resource = e?.detail?.resource;
+    const handleSync = (e: Event) => {
+      const customEvent = e as CustomEvent<{ resource?: string }>;
+      const resource = customEvent?.detail?.resource;
       if (!resource || resource === 'warehouses' || resource === 'locations' || resource === 'inventory') {
         fetchWarehouses();
         if (selectedWarehouse?.id) {
@@ -215,8 +215,8 @@ export default function WarehousesPage() {
       }
       setShowWhModal(false);
       await fetchWarehouses();
-    } catch (err: any) {
-      setWhFormError(err.message || 'Operation failed');
+    } catch (err: unknown) {
+      setWhFormError((err as Error).message || 'Operation failed');
     } finally {
       setIsWhSubmitting(false);
     }
@@ -232,8 +232,8 @@ export default function WarehousesPage() {
       setShowDeleteWhModal(false);
       setSelectedWhId(null);
       await fetchWarehouses();
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to delete warehouse');
+    } catch (err: unknown) {
+      setErrorMsg((err as Error).message || 'Failed to delete warehouse');
     } finally {
       setIsWhSubmitting(false);
     }
@@ -276,8 +276,8 @@ export default function WarehousesPage() {
       setShowBinModal(false);
       await fetchLocations(selectedWarehouse.id);
       await fetchWarehouses(); // update bin counts
-    } catch (err: any) {
-      setBinFormError(err.message || 'Failed to create bin');
+    } catch (err: unknown) {
+      setBinFormError((err as Error).message || 'Failed to create bin');
     } finally {
       setIsBinSubmitting(false);
     }
@@ -293,8 +293,8 @@ export default function WarehousesPage() {
         fetchLocations(selectedWarehouse.id);
         fetchWarehouses();
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to delete location');
+    } catch (err: unknown) {
+      setErrorMsg((err as Error).message || 'Failed to delete location');
     }
   };
 
@@ -333,7 +333,7 @@ export default function WarehousesPage() {
         );
       case 'staging_area':
         return (
-          <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 border border-purple-200/50">
+          <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-teal-50 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300 border border-teal-200/50">
             <PackageCheck className="w-2.5 h-2.5" /> Staging
           </span>
         );
@@ -350,7 +350,7 @@ export default function WarehousesPage() {
               <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#1B1B1F] dark:text-white">
                 {t('warehousesTitle')}
               </h1>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#F4F3FF] text-[#6C5CE7] dark:bg-[#7C6EF0]/15 dark:text-[#A594FD] border border-[#E0DCFC] dark:border-[#7C6EF0]/30">
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#0B3333]/10 text-[#0B3333] dark:bg-[#0B3333]/30 dark:text-[#2dd4bf] border border-[#0B3333]/20">
                 {warehouses.length} {t('units')}
               </span>
             </div>
@@ -362,7 +362,7 @@ export default function WarehousesPage() {
           {canManage && (
             <button
               onClick={handleOpenAddWh}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#7C6EF0] hover:bg-[#6C5CE7] text-white text-sm font-semibold transition-all shadow-sm shadow-[#7C6EF0]/20 self-start sm:self-auto cursor-pointer"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#0B3333] hover:bg-[#082626] text-white text-sm font-semibold transition-all shadow-xs self-start sm:self-auto cursor-pointer"
             >
               <Plus className="w-4 h-4 stroke-[2.5]" />
               <span>{t('addFacility')}</span>
@@ -386,10 +386,10 @@ export default function WarehousesPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {isLoadingWh ? (
             <div className="col-span-3 py-10 flex justify-center text-slate-400">
-              <Loader2 className="w-6 h-6 animate-spin" />
+              <Loader2 className="w-6 h-6 animate-spin text-[#0B3333] dark:text-[#2dd4bf]" />
             </div>
           ) : warehouses.length === 0 ? (
-            <div className="col-span-3 py-16 text-center text-slate-500 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-8">
+            <div className="col-span-3 py-16 text-center text-slate-500 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-8 shadow-xs">
               <Building2 className="w-12 h-12 mx-auto mb-3 text-slate-300 dark:text-slate-700" />
               <p className="text-base font-semibold text-slate-800 dark:text-slate-200">
                 {t('noWarehousesTitle')}
@@ -405,15 +405,15 @@ export default function WarehousesPage() {
                 <div
                   key={wh.id}
                   onClick={() => setSelectedWhId(wh.id)}
-                  className={`cursor-pointer p-5 rounded-2xl border transition-all relative ${
+                  className={`cursor-pointer p-5 rounded-xl border transition-all relative ${
                     isSelected
-                      ? 'bg-indigo-50/50 dark:bg-indigo-950/30 border-indigo-500 shadow-md ring-2 ring-indigo-500/20'
-                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 shadow-xs'
+                      ? 'bg-[#0B3333]/5 dark:bg-[#0B3333]/20 border-[#0B3333] dark:border-[#2dd4bf] shadow-sm ring-2 ring-[#0B3333]/20 dark:ring-[#2dd4bf]/20'
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 shadow-2xs'
                   }`}
                 >
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-2.5">
-                      <div className="p-2.5 rounded-xl bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
+                      <div className="p-2.5 rounded-xl bg-[#0B3333]/10 dark:bg-[#0B3333]/30 text-[#0B3333] dark:text-[#2dd4bf]">
                         <Building2 className="w-5 h-5" />
                       </div>
                       <div>
@@ -435,7 +435,7 @@ export default function WarehousesPage() {
                     <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1.5 text-slate-600 dark:text-slate-300">
                       <div className="flex items-center justify-between">
                         <span>{language === 'id' ? 'Kapasitas' : 'Capacity'}: {wh.capacity.toLocaleString()} units</span>
-                        <span className="font-semibold text-indigo-600 dark:text-indigo-400">
+                        <span className="font-semibold font-mono text-[#0B3333] dark:text-[#2dd4bf]">
                           {wh.total_bins || 0} Bins
                         </span>
                       </div>
@@ -454,13 +454,13 @@ export default function WarehousesPage() {
                   </div>
 
                   {canManage && isSelected && (
-                    <div className="mt-3 pt-3 border-t border-indigo-100 dark:border-indigo-900/40 flex items-center justify-end gap-2">
+                    <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2">
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           handleOpenEditWh(wh);
                         }}
-                        className="px-2.5 py-1 rounded text-xs font-semibold text-slate-600 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-300 flex items-center gap-1"
+                        className="px-2.5 py-1 rounded text-xs font-semibold text-slate-600 hover:text-[#0B3333] dark:text-slate-400 dark:hover:text-[#2dd4bf] flex items-center gap-1 transition-colors"
                       >
                         <Edit2 className="w-3 h-3" /> Edit
                       </button>
@@ -470,7 +470,7 @@ export default function WarehousesPage() {
                           setSelectedWhId(wh.id);
                           setShowDeleteWhModal(true);
                         }}
-                        className="px-2.5 py-1 rounded text-xs font-semibold text-red-500 hover:text-red-700 flex items-center gap-1"
+                        className="px-2.5 py-1 rounded text-xs font-semibold text-red-500 hover:text-red-700 flex items-center gap-1 transition-colors"
                       >
                         <Trash2 className="w-3 h-3" /> Delete
                       </button>
@@ -484,11 +484,11 @@ export default function WarehousesPage() {
 
         {/* Selected Warehouse Rack & Bin Location Inspector */}
         {selectedWarehouse && (
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-xs space-y-6">
+          <div className="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-800 shadow-xs space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-slate-200 dark:border-slate-800">
               <div>
                 <div className="flex items-center gap-2">
-                  <Grid className="w-5 h-5 text-indigo-600" />
+                  <Grid className="w-5 h-5 text-[#0B3333] dark:text-[#2dd4bf]" />
                   <h2 className="text-lg font-bold text-slate-900 dark:text-white">
                     Rack & Bin Map: {selectedWarehouse.name}
                   </h2>
@@ -510,7 +510,7 @@ export default function WarehousesPage() {
                     setBinFormError(null);
                     setShowBinModal(true);
                   }}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 text-xs font-semibold transition-colors self-start sm:self-auto border border-indigo-200/50 dark:border-indigo-800/40"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#0B3333] hover:bg-[#082626] text-white text-xs font-semibold transition-colors self-start sm:self-auto shadow-xs cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Add Storage Bin</span>
@@ -520,7 +520,7 @@ export default function WarehousesPage() {
 
             {isLoadingLoc ? (
               <div className="py-12 flex justify-center text-slate-400">
-                <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
+                <Loader2 className="w-6 h-6 animate-spin text-[#0B3333] dark:text-[#2dd4bf]" />
               </div>
             ) : Object.keys(groupedLocations).length === 0 ? (
               <div className="py-16 text-center text-slate-500">
@@ -537,11 +537,11 @@ export default function WarehousesPage() {
                 {Object.entries(groupedLocations).map(([groupTitle, locs]) => (
                   <div key={groupTitle} className="space-y-3">
                     <div className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-indigo-600"></span>
+                      <span className="w-2 h-2 rounded-full bg-[#0B3333] dark:bg-[#2dd4bf]"></span>
                       <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
                         {groupTitle}
                       </h4>
-                      <span className="text-[11px] text-slate-400">
+                      <span className="text-[11px] text-slate-400 font-mono">
                         ({locs.length} bins)
                       </span>
                     </div>
@@ -555,7 +555,7 @@ export default function WarehousesPage() {
                           {canManage && (
                             <button
                               onClick={() => handleDeleteBin(l.id)}
-                              className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500 transition-opacity p-0.5"
+                              className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500 transition-opacity p-0.5 cursor-pointer"
                               title="Delete bin"
                             >
                               <X className="w-3.5 h-3.5" />
@@ -621,7 +621,7 @@ export default function WarehousesPage() {
       {/* Add / Edit Warehouse Modal */}
       {showWhModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800">
+          <div className="bg-white dark:bg-slate-900 rounded-xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800">
             <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
               <h3 className="text-lg font-bold text-slate-900 dark:text-white">
                 {isEditingWh ? 'Edit Warehouse' : 'Add New Warehouse'}
@@ -651,7 +651,7 @@ export default function WarehousesPage() {
                   required
                   value={whName}
                   onChange={(e) => setWhName(e.target.value)}
-                  className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                  className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                   placeholder="e.g. Jakarta Central Fulfillment"
                 />
               </div>
@@ -665,7 +665,7 @@ export default function WarehousesPage() {
                     <button
                       type="button"
                       onClick={handleGenerateWhCode}
-                      className="text-[11px] font-semibold text-[#7C6EF0] hover:text-[#6C5CE7] flex items-center gap-1 cursor-pointer transition-colors"
+                      className="text-[11px] font-semibold text-[#0B3333] dark:text-[#2dd4bf] hover:underline flex items-center gap-1 cursor-pointer transition-colors"
                     >
                       <Sparkles className="w-3 h-3" /> Auto
                     </button>
@@ -674,7 +674,7 @@ export default function WarehousesPage() {
                     type="text"
                     value={whCode}
                     onChange={(e) => setWhCode(e.target.value)}
-                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm font-mono text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-mono text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     placeholder="WH-JKT-01"
                   />
                 </div>
@@ -688,7 +688,7 @@ export default function WarehousesPage() {
                     required
                     value={whCity}
                     onChange={(e) => setWhCity(e.target.value)}
-                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     placeholder="Jakarta Barat"
                   />
                 </div>
@@ -703,7 +703,7 @@ export default function WarehousesPage() {
                   required
                   value={whAddress}
                   onChange={(e) => setWhAddress(e.target.value)}
-                  className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                  className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                   placeholder="Jl. Raya Industri No. 12, Kalideres"
                 />
               </div>
@@ -719,7 +719,7 @@ export default function WarehousesPage() {
                   required
                   value={whCapacity}
                   onChange={(e) => setWhCapacity(e.target.value === '' ? '' : Number(e.target.value))}
-                  className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm font-mono text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                  className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-mono text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                 />
               </div>
 
@@ -727,14 +727,14 @@ export default function WarehousesPage() {
                 <button
                   type="button"
                   onClick={() => setShowWhModal(false)}
-                  className="px-5 py-2.5 text-sm font-semibold rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                  className="px-5 py-2.5 text-sm font-semibold rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:border-[#0B3333] hover:text-[#0B3333] dark:hover:border-[#2dd4bf] dark:hover:text-[#2dd4bf] transition-colors cursor-pointer shadow-2xs"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isWhSubmitting}
-                  className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-[#7C6EF0] hover:bg-[#6C5CE7] text-white font-semibold text-sm transition-all shadow-sm shadow-[#7C6EF0]/20 cursor-pointer disabled:opacity-50"
+                  className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-[#0B3333] hover:bg-[#082626] text-white font-semibold text-sm transition-all shadow-xs cursor-pointer disabled:opacity-50"
                 >
                   {isWhSubmitting ? (
                     <>
@@ -756,7 +756,7 @@ export default function WarehousesPage() {
       {/* Add Location Bin Modal */}
       {showBinModal && selectedWarehouse && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800">
+          <div className="bg-white dark:bg-slate-900 rounded-xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800">
             <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
               <h3 className="text-lg font-bold text-slate-900 dark:text-white">
                 Add Bin Location
@@ -777,7 +777,7 @@ export default function WarehousesPage() {
             )}
 
             {/* Warehouse Capacity & Allocation Status */}
-            <div className="mt-4 p-3.5 rounded-xl border border-[#EEEDF5] dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/40 text-xs space-y-2">
+            <div className="mt-4 p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/40 text-xs space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-slate-600 dark:text-slate-400 font-medium">
                   {language === 'id' ? 'Kapasitas Total Gudang' : 'Total Warehouse Capacity'}:
@@ -790,7 +790,7 @@ export default function WarehousesPage() {
                 <span className="text-slate-500 dark:text-slate-400">
                   {language === 'id' ? 'Sudah Teralokasi ke Rak' : 'Already Allocated to Bins'}:
                 </span>
-                <span className="font-semibold font-mono text-[#7C6EF0] dark:text-indigo-400">
+                <span className="font-semibold font-mono text-[#0B3333] dark:text-[#2dd4bf]">
                   {currentTotalBinCapacity.toLocaleString()} unit ({locations.length} rak)
                 </span>
               </div>
@@ -819,11 +819,11 @@ export default function WarehousesPage() {
             </div>
 
             <form onSubmit={handleSubmitBin} className="mt-4 space-y-4">
-              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-[#EEEDF5] dark:border-slate-700 text-xs flex items-center justify-between">
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs flex items-center justify-between">
                 <span className="text-slate-600 dark:text-slate-400 font-medium">
                   Generated Bin Code:
                 </span>
-                <span className="font-mono font-bold text-[#7C6EF0] dark:text-indigo-300 text-sm">
+                <span className="font-mono font-bold text-[#0B3333] dark:text-[#2dd4bf] text-sm">
                   {binZone.toUpperCase() || '?'}-{binRack || '?'}-{binShelf || '?'}-{binSlot.toUpperCase() || '?'}
                 </span>
               </div>
@@ -838,7 +838,7 @@ export default function WarehousesPage() {
                     required
                     value={binZone}
                     onChange={(e) => setBinZone(e.target.value)}
-                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm uppercase font-mono text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm uppercase font-mono text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     placeholder="A"
                   />
                 </div>
@@ -852,7 +852,7 @@ export default function WarehousesPage() {
                     required
                     value={binRack}
                     onChange={(e) => setBinRack(e.target.value)}
-                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm font-mono text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-mono text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     placeholder="01"
                   />
                 </div>
@@ -868,7 +868,7 @@ export default function WarehousesPage() {
                     required
                     value={binShelf}
                     onChange={(e) => setBinShelf(e.target.value)}
-                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm font-mono text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-mono text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     placeholder="01"
                   />
                 </div>
@@ -882,7 +882,7 @@ export default function WarehousesPage() {
                     required
                     value={binSlot}
                     onChange={(e) => setBinSlot(e.target.value)}
-                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm uppercase font-mono text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm uppercase font-mono text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     placeholder="A"
                   />
                 </div>
@@ -896,7 +896,7 @@ export default function WarehousesPage() {
                   <select
                     value={binType}
                     onChange={(e) => setBinType(e.target.value as LocationType)}
-                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors cursor-pointer"
                   >
                     <option value="shelf">Standard Shelf</option>
                     <option value="pallet_rack">Heavy Pallet Rack</option>
@@ -920,7 +920,7 @@ export default function WarehousesPage() {
                     className={`block w-full h-10 px-3.5 bg-white dark:bg-slate-800 border rounded-xl text-sm font-mono text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none transition-colors ${
                       Number(binMaxCapacity) > remainingWhCapacity
                         ? 'border-rose-500 focus:ring-2 focus:ring-rose-500'
-                        : 'border-[#EEEDF5] dark:border-slate-700 focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0]'
+                        : 'border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333]'
                     }`}
                   />
                   {Number(binMaxCapacity) > remainingWhCapacity && (
@@ -937,7 +937,7 @@ export default function WarehousesPage() {
                 <button
                   type="button"
                   onClick={() => setShowBinModal(false)}
-                  className="px-5 py-2.5 text-sm font-semibold rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                  className="px-5 py-2.5 text-sm font-semibold rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:border-[#0B3333] hover:text-[#0B3333] dark:hover:border-[#2dd4bf] dark:hover:text-[#2dd4bf] transition-colors cursor-pointer shadow-2xs"
                 >
                   Cancel
                 </button>
@@ -948,7 +948,7 @@ export default function WarehousesPage() {
                     remainingWhCapacity <= 0 ||
                     Number(binMaxCapacity) > remainingWhCapacity
                   }
-                  className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-[#7C6EF0] hover:bg-[#6C5CE7] text-white font-semibold text-sm transition-all shadow-sm shadow-[#7C6EF0]/20 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-[#0B3333] hover:bg-[#082626] text-white font-semibold text-sm transition-all shadow-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {isBinSubmitting ? (
                     <>
@@ -968,8 +968,8 @@ export default function WarehousesPage() {
       {/* Delete Warehouse Modal */}
       {showDeleteWhModal && selectedWarehouse && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800">
-            <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-950/50 text-red-600 dark:text-red-400 flex items-center justify-center mx-auto mb-4">
+          <div className="bg-white dark:bg-slate-900 rounded-xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800">
+            <div className="w-12 h-12 rounded-xl bg-red-100 dark:bg-red-950/50 text-red-600 dark:text-red-400 flex items-center justify-center mx-auto mb-4">
               <Trash2 className="w-6 h-6" />
             </div>
 
@@ -988,7 +988,7 @@ export default function WarehousesPage() {
               <button
                 type="button"
                 onClick={() => setShowDeleteWhModal(false)}
-                className="px-5 py-2.5 text-sm font-semibold rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                className="px-5 py-2.5 text-sm font-semibold rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:border-slate-300 dark:hover:border-slate-700 transition-colors cursor-pointer shadow-2xs"
               >
                 Cancel
               </button>
@@ -996,7 +996,7 @@ export default function WarehousesPage() {
                 type="button"
                 onClick={handleDeleteWh}
                 disabled={isWhSubmitting}
-                className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-rose-600 hover:bg-rose-700 text-white font-semibold text-sm transition-all shadow-sm shadow-rose-600/20 cursor-pointer disabled:opacity-50"
+                className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold text-sm transition-all shadow-sm shadow-rose-600/20 cursor-pointer disabled:opacity-50"
               >
                 {isWhSubmitting ? (
                   <>

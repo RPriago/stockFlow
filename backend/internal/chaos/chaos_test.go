@@ -175,6 +175,7 @@ func setupChaosTestEnvironment() (*gin.Engine, *config.Config, *models.Product, 
 		poGroup.Use(middleware.AuthMiddleware(cfg))
 		{
 			poGroup.GET("", poHandler.ListPOs)
+			poGroup.PUT("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), poHandler.UpdatePO)
 			poGroup.DELETE("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), poHandler.DeletePO)
 		}
 
@@ -182,6 +183,7 @@ func setupChaosTestEnvironment() (*gin.Engine, *config.Config, *models.Product, 
 		soGroup.Use(middleware.AuthMiddleware(cfg))
 		{
 			soGroup.GET("", soHandler.ListSOs)
+			soGroup.PUT("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), soHandler.UpdateSO)
 			soGroup.DELETE("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleWarehouseManager), soHandler.DeleteSO)
 		}
 
@@ -469,7 +471,7 @@ func TestChaos_Security_BruteForceLoginSurge_500Reqs(t *testing.T) {
 			<-barrier
 			router.ServeHTTP(w, req)
 
-			if w.Code == http.StatusUnauthorized {
+			if w.Code == http.StatusUnauthorized || w.Code == http.StatusTooManyRequests {
 				atomic.AddInt64(&rejectedCount, 1)
 			} else {
 				atomic.AddInt64(&crashCount, 1)
@@ -484,7 +486,7 @@ func TestChaos_Security_BruteForceLoginSurge_500Reqs(t *testing.T) {
 
 	t.Logf("=== 500 BRUTE FORCE LOGIN SURGE ===")
 	t.Logf("Duration: %v (~%.0f req/s)", duration, float64(totalAttacks)/duration.Seconds())
-	t.Logf("Correctly Rejected (401 Unauthorized): %d / %d", rejectedCount, totalAttacks)
+	t.Logf("Correctly Rejected (401/429 Rejections): %d / %d", rejectedCount, totalAttacks)
 
 	if rejectedCount != int64(totalAttacks) {
 		t.Errorf("Brute force defense leak! Expected %d rejections, got %d (unexpected: %d)", totalAttacks, rejectedCount, crashCount)
@@ -600,9 +602,19 @@ func TestChaos_Security_PrivilegeEscalation_StaffForbidden(t *testing.T) {
 			body:     "",
 		},
 		{
+			method:   http.MethodPut,
+			endpoint: "/api/v1/purchase-orders/" + primitive.NewObjectID().Hex(),
+			body:     `{"notes":"Hacked PO note"}`,
+		},
+		{
 			method:   http.MethodDelete,
 			endpoint: "/api/v1/sales-orders/" + primitive.NewObjectID().Hex(),
 			body:     "",
+		},
+		{
+			method:   http.MethodPut,
+			endpoint: "/api/v1/sales-orders/" + primitive.NewObjectID().Hex(),
+			body:     `{"notes":"Hacked SO note"}`,
 		},
 		{
 			method:   http.MethodGet,

@@ -19,6 +19,10 @@ type cacheItem struct {
 	expiresAt time.Time
 }
 
+const (
+	MaxCacheItems = 1000
+)
+
 type MemoryCache struct {
 	mu    sync.RWMutex
 	items map[string]cacheItem
@@ -41,11 +45,36 @@ func (mc *MemoryCache) Get(key string) (cacheItem, bool) {
 func (mc *MemoryCache) Set(key string, status int, headers http.Header, body []byte, ttl time.Duration) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
+
+	now := time.Now()
+
+	// PERF-004: Cap Memory Cache Map Size to prevent unbounded memory growth
+	if len(mc.items) >= MaxCacheItems {
+		// First pass: purge expired items
+		for k, it := range mc.items {
+			if now.After(it.expiresAt) {
+				delete(mc.items, k)
+			}
+		}
+
+		// If still at capacity, evict oldest items up to 10%
+		if len(mc.items) >= MaxCacheItems {
+			evictCount := MaxCacheItems / 10
+			for k := range mc.items {
+				delete(mc.items, k)
+				evictCount--
+				if evictCount <= 0 {
+					break
+				}
+			}
+		}
+	}
+
 	mc.items[key] = cacheItem{
 		status:    status,
 		headers:   headers.Clone(),
 		body:      body,
-		expiresAt: time.Now().Add(ttl),
+		expiresAt: now.Add(ttl),
 	}
 }
 
@@ -53,6 +82,41 @@ func (mc *MemoryCache) InvalidateAll() {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
 	mc.items = make(map[string]cacheItem)
+}
+
+// InvalidateByResource selectively purges cached responses for affected resource domains,
+// eliminating cache invalidation blast radius during concurrent operations (PERF-001).
+func (mc *MemoryCache) InvalidateByResource(resource string) {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+
+	var prefixes []string
+	switch resource {
+	case "products", "categories":
+		prefixes = []string{"/api/v1/products", "/api/v1/categories"}
+	case "warehouses", "locations":
+		prefixes = []string{"/api/v1/warehouses", "/api/v1/locations", "/api/v1/inventory"}
+	case "inventory":
+		prefixes = []string{"/api/v1/inventory", "/api/v1/warehouses"}
+	case "purchase_orders":
+		prefixes = []string{"/api/v1/purchase-orders", "/api/v1/inventory"}
+	case "sales_orders":
+		prefixes = []string{"/api/v1/sales-orders", "/api/v1/outbound-orders", "/api/v1/inventory"}
+	case "users":
+		prefixes = []string{"/api/v1/users"}
+	default:
+		mc.items = make(map[string]cacheItem)
+		return
+	}
+
+	for k := range mc.items {
+		for _, prefix := range prefixes {
+			if strings.Contains(k, prefix) {
+				delete(mc.items, k)
+				break
+			}
+		}
+	}
 }
 
 type cachedWriter struct {
@@ -98,10 +162,10 @@ func CacheMiddleware(defaultTTL time.Duration) gin.HandlerFunc {
 		if c.Request.Method != http.MethodGet {
 			c.Next()
 			if c.Writer.Status() >= 200 && c.Writer.Status() < 300 {
-				globalCache.InvalidateAll()
+				resource := extractResource(c.Request.URL.Path)
+				globalCache.InvalidateByResource(resource)
 
 				// Broadcast real-time change event to all connected SSE clients
-				resource := extractResource(c.Request.URL.Path)
 				events.GetBroker().Broadcast("data_changed", gin.H{
 					"resource":  resource,
 					"method":    c.Request.Method,
@@ -112,8 +176,13 @@ func CacheMiddleware(defaultTTL time.Duration) gin.HandlerFunc {
 			return
 		}
 
-		// Don't cache auth verification, health check, notifications, or SSE events
-		if strings.HasPrefix(c.Request.URL.Path, "/api/v1/auth") || strings.HasPrefix(c.Request.URL.Path, "/api/v1/notifications") || strings.HasPrefix(c.Request.URL.Path, "/api/v1/events") || c.Request.URL.Path == "/health" {
+		// Don't cache auth verification, health check, notifications, users, admin, or SSE events
+		if strings.HasPrefix(c.Request.URL.Path, "/api/v1/auth") ||
+			strings.HasPrefix(c.Request.URL.Path, "/api/v1/notifications") ||
+			strings.HasPrefix(c.Request.URL.Path, "/api/v1/events") ||
+			strings.HasPrefix(c.Request.URL.Path, "/api/v1/users") ||
+			strings.HasPrefix(c.Request.URL.Path, "/api/v1/admin") ||
+			c.Request.URL.Path == "/health" {
 			c.Next()
 			return
 		}

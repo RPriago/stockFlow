@@ -1,8 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
-import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { api } from '@/lib/api';
 import { Product, ProductListResult } from '@/types/product';
@@ -15,8 +14,10 @@ import {
   AlertTriangle,
   ArrowDownLeft,
   ArrowUpRight,
+  ArrowDownRight,
   Calendar,
   ChevronDown,
+  ChevronUp,
   ArrowUp,
   ArrowDown,
   Plus,
@@ -25,7 +26,8 @@ import {
   TrendingUp,
   Inbox,
   Check,
-  Building2,
+  RotateCw,
+  AlertCircle,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -75,7 +77,6 @@ interface InventoryMovement {
 }
 
 export default function DashboardPage() {
-  const { user } = useAuth();
   const { t, language } = useLanguage();
   const [totalProducts, setTotalProducts] = useState<number>(0);
   const [invStats, setInvStats] = useState<InventoryStats | null>(null);
@@ -93,22 +94,29 @@ export default function DashboardPage() {
   const [flowPoints, setFlowPoints] = useState<FlowPoint[]>([]);
   const [capacityData, setCapacityData] = useState<WarehouseCapacityResponse | null>(null);
 
+  // 4 UI States: loading & error handling
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [hasError, setHasError] = useState<boolean>(false);
+
   // Interactive Date Range State
   const [selectedDateRange, setSelectedDateRange] = useState('today');
   const [isDateMenuOpen, setIsDateMenuOpen] = useState(false);
   const dateMenuRef = useRef<HTMLDivElement>(null);
 
+  // Responsive KPI metrics collapse state
+  const [showAllMetrics, setShowAllMetrics] = useState(false);
+
   // Interactive Chart Period State
   const [chartPeriod, setChartPeriod] = useState<'monthly' | 'daily'>('daily');
   const [hoveredBarIndex, setHoveredBarIndex] = useState<number | null>(null);
 
-  const dateOptions = [
+  const dateOptions = useMemo(() => [
     { id: 'today', label: language === 'id' ? 'Hari Ini' : 'Today' },
     { id: 'last_7d', label: language === 'id' ? '7 Hari Terakhir' : 'Last 7 Days' },
     { id: 'this_month', label: language === 'id' ? 'Bulan Ini' : 'This Month' },
     { id: 'last_30d', label: language === 'id' ? '30 Hari Terakhir' : 'Last 30 Days' },
     { id: 'all_time', label: language === 'id' ? 'Semua Waktu (2026)' : 'All Time (2026)' },
-  ];
+  ], [language]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -122,64 +130,70 @@ export default function DashboardPage() {
   }, []);
 
   // Fetch Dashboard KPIs and Lists
-  useEffect(() => {
-    async function loadStats() {
-      try {
-        const [prodRes, invRes, poRes, soRes, movRes, poListRes, soListRes] = await Promise.all([
-          api.get<ProductListResult>('/products?page=1&limit=200&include_deleted=true'),
-          api.get<InventoryStats>('/inventory/stats'),
-          api.get<POStats>('/purchase-orders/stats'),
-          api.get<SOStats>('/sales-orders/stats'),
-          api.get<{ movements: InventoryMovement[] }>('/inventory/movements?page=1&limit=6'),
-          api.get<{ orders: PurchaseOrder[] }>('/purchase-orders?page=1&limit=200'),
-          api.get<{ orders: SalesOrder[] }>('/sales-orders?page=1&limit=200'),
-        ]);
+  const loadStats = useCallback(async () => {
+    setIsLoading(true);
+    setHasError(false);
+    try {
+      const [prodRes, invRes, poRes, soRes, movRes, poListRes, soListRes] = await Promise.all([
+        api.get<ProductListResult>('/products?page=1&limit=200&include_deleted=true'),
+        api.get<InventoryStats>('/inventory/stats'),
+        api.get<POStats>('/purchase-orders/stats'),
+        api.get<SOStats>('/sales-orders/stats'),
+        api.get<{ movements: InventoryMovement[] }>('/inventory/movements?page=1&limit=6'),
+        api.get<{ orders: PurchaseOrder[] }>('/purchase-orders?page=1&limit=200'),
+        api.get<{ orders: SalesOrder[] }>('/sales-orders?page=1&limit=200'),
+      ]);
 
-        if (prodRes.success && prodRes.data) {
-          const prods = prodRes.data.products || [];
-          const activeOnly = prods.filter((p) => !p.is_deleted);
-          setTotalProducts(activeOnly.length);
-          setProductsList(prods);
-        }
-        if (invRes.success && invRes.data) {
-          setInvStats(invRes.data);
-        }
-        if (poRes.success && poRes.data) {
-          setPoStats(poRes.data);
-        }
-        if (soRes.success && soRes.data) {
-          setSoStats(soRes.data);
-        }
-        if (poListRes.success && poListRes.data?.orders) {
-          setPoList(poListRes.data.orders);
-        }
-        if (soListRes.success && soListRes.data?.orders) {
-          setSoList(soListRes.data.orders);
-        }
-        if (movRes.success && movRes.data?.movements) {
-          const mapped: RecentMovement[] = movRes.data.movements.map((m, index) => ({
-            id: m.id ?? m._id ?? `movement-${index}`,
-            item_name: m.product_name || 'Inventory Item',
-            sku: m.product_sku || 'SKU-UNKNOWN',
-            type: m.type === 'in' ? 'Inbound' : m.type === 'out' ? 'Outbound' : 'Transfer',
-            warehouse: m.warehouse_name || 'Main Hub',
-            location: m.location_code || 'Zone A',
-            qty: m.quantity,
-            time: new Date(m.created_at).toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
-            }),
-          }));
-          setMovements(mapped);
-        } else {
-          setMovements([]);
-        }
-      } catch {
-        // Handled cleanly
+      if (prodRes.success && prodRes.data) {
+        const prods = prodRes.data.products || [];
+        const activeOnly = prods.filter((p) => !p.is_deleted);
+        setTotalProducts(activeOnly.length);
+        setProductsList(prods);
       }
+      if (invRes.success && invRes.data) {
+        setInvStats(invRes.data);
+      }
+      if (poRes.success && poRes.data) {
+        setPoStats(poRes.data);
+      }
+      if (soRes.success && soRes.data) {
+        setSoStats(soRes.data);
+      }
+      if (poListRes.success && poListRes.data?.orders) {
+        setPoList(poListRes.data.orders);
+      }
+      if (soListRes.success && soListRes.data?.orders) {
+        setSoList(soListRes.data.orders);
+      }
+      if (movRes.success && movRes.data?.movements) {
+        const mapped: RecentMovement[] = movRes.data.movements.map((m, index) => ({
+          id: m.id ?? m._id ?? `movement-${index}`,
+          item_name: m.product_name || 'Inventory Item',
+          sku: m.product_sku || 'SKU-UNKNOWN',
+          type: m.type === 'in' ? 'Inbound' : m.type === 'out' ? 'Outbound' : 'Transfer',
+          warehouse: m.warehouse_name || 'Main Hub',
+          location: m.location_code || 'Zone A',
+          qty: m.quantity,
+          time: new Date(m.created_at).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+        }));
+        setMovements(mapped);
+      } else {
+        setMovements([]);
+      }
+    } catch {
+      setHasError(true);
+    } finally {
+      setIsLoading(false);
     }
+  }, []);
 
-    loadStats();
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      loadStats();
+    }, 0);
 
     const handleRefresh = () => {
       loadStats();
@@ -189,12 +203,13 @@ export default function DashboardPage() {
       window.addEventListener('stockflow-sync', handleRefresh);
     }
     return () => {
+      clearTimeout(timer);
       if (typeof window !== 'undefined') {
         window.removeEventListener('stockflow-notification-refresh', handleRefresh);
         window.removeEventListener('stockflow-sync', handleRefresh);
       }
     };
-  }, []);
+  }, [loadStats]);
 
   // Fetch Dynamic Analytics (Stock Flow & Capacity)
   useEffect(() => {
@@ -254,8 +269,8 @@ export default function DashboardPage() {
   const selectedDateLabel =
     dateOptions.find((o) => o.id === selectedDateRange)?.label || dateOptions[0].label;
 
-  // Dynamic SVG palette for Donut segments
-  const donutColors = ['#7C6EF0', '#9D93F5', '#C7BFFA', '#A78BFA', '#818CF8'];
+  // Industrial warehouse palette for Capacity Donut segments (Teal, Slate, Amber)
+  const donutColors = ['#0B3333', '#0D9488', '#14B8A6', '#475569', '#64748B', '#D97706'];
 
   // Dynamic KPI calculations based on real records and date range comparison
   const metrics = useMemo(() => {
@@ -309,7 +324,7 @@ export default function DashboardPage() {
       }
     }
 
-    // 1. Total Catalog Products (Catalog size and net growth vs baseline)
+    // 1. Total Catalog Products
     const activeProductsNow = productsList.filter((p) => !p.is_deleted).length;
     const activeProductsAtBaseline = productsList.filter((p) => {
       const createdAt = new Date(p.created_at);
@@ -338,7 +353,7 @@ export default function DashboardPage() {
       prodIsPositive = true;
     }
 
-    // 2. Total Stock on Hand (Cumulative inventory units and period flow delta)
+    // 2. Total Stock on Hand
     const currentStock = invStats ? invStats.total_on_hand : 0;
     const netFlow = flowTotals.inbound - flowTotals.outbound;
     const baselineStock = Math.max(currentStock - netFlow, 1);
@@ -356,17 +371,16 @@ export default function DashboardPage() {
     let lowStockIsPositive = true;
 
     if (lowStockCount > 0) {
-      // Estimate baseline low-stock before period based on net dispatch
       const prevLowStock = Math.max(lowStockCount - (netFlow < 0 ? 1 : 0), 1);
       const diff = lowStockCount - prevLowStock;
       if (diff > 0) {
         const pct = (diff / prevLowStock) * 100;
         lowStockChange = '+' + pct.toFixed(1) + '%';
-        lowStockIsPositive = false; // alert count increased
+        lowStockIsPositive = false;
       } else if (diff < 0) {
         const pct = (Math.abs(diff) / prevLowStock) * 100;
         lowStockChange = '-' + pct.toFixed(1) + '%';
-        lowStockIsPositive = true; // alert count decreased
+        lowStockIsPositive = true;
       } else {
         lowStockChange = '+0.0%';
         lowStockIsPositive = false;
@@ -483,40 +497,39 @@ export default function DashboardPage() {
     soList,
     flowTotals,
     selectedDateRange,
-    language,
     t,
   ]);
 
   return (
     <DashboardLayout>
-      <div className="space-y-7">
+      <div className="space-y-6">
         {/* Top Header Section */}
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#1B1B1F] dark:text-white">
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
               {t('dashboardTitle')}
             </h1>
-            <p className="mt-1 text-sm text-[#8B8B99] dark:text-slate-400">
+            <p className="mt-1 text-xs sm:text-sm text-slate-500 dark:text-slate-400">
               {t('dashboardSubtitle')}
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
             {/* Interactive Calendar Filter Dropdown */}
             <div className="relative" ref={dateMenuRef}>
               <button
                 type="button"
                 onClick={() => setIsDateMenuOpen((prev) => !prev)}
-                className="flex items-center gap-2 px-4 py-2 rounded-full border border-[#EEEDF5] dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-semibold text-[#1B1B1F] dark:text-white shadow-xs hover:border-[#7C6EF0] transition-colors cursor-pointer"
+                className="flex items-center gap-2 px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs sm:text-sm font-semibold text-slate-800 dark:text-slate-200 hover:border-slate-300 dark:hover:border-slate-700 transition-colors cursor-pointer"
               >
-                <Calendar className="w-4 h-4 text-[#7C6EF0]" />
+                <Calendar className="w-4 h-4 text-[#0B3333] dark:text-emerald-400" />
                 <span>{selectedDateLabel}</span>
-                <ChevronDown className="w-4 h-4 text-[#8B8B99] dark:text-slate-400 ml-0.5" />
+                <ChevronDown className="w-4 h-4 text-slate-400 ml-0.5" />
               </button>
 
               {isDateMenuOpen && (
-                <div className="absolute left-0 sm:left-auto sm:right-0 mt-2 w-48 bg-white dark:bg-slate-800 rounded-2xl border border-[#EEEDF5] dark:border-slate-700 shadow-xl py-1.5 z-40 animate-in fade-in zoom-in-95">
-                  <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#8B8B99] dark:text-slate-400 border-b border-[#EEEDF5] dark:border-slate-700/60 mb-1">
+                <div className="absolute left-0 sm:left-auto sm:right-0 mt-2 w-48 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-lg py-1.5 z-40 animate-in fade-in zoom-in-95">
+                  <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100 dark:border-slate-800 mb-1">
                     {t('filter')}
                   </div>
                   {dateOptions.map((opt) => (
@@ -532,11 +545,11 @@ export default function DashboardPage() {
                         }
                         setIsDateMenuOpen(false);
                       }}
-                      className="w-full flex items-center justify-between px-3.5 py-2 text-xs text-left font-medium text-[#1B1B1F] dark:text-slate-200 hover:bg-[#F4F3FF] dark:hover:bg-slate-700/60 hover:text-[#7C6EF0] transition-colors cursor-pointer"
+                      className="w-full flex items-center justify-between px-3.5 py-2 text-xs text-left font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
                     >
                       <span>{opt.label}</span>
                       {selectedDateRange === opt.id && (
-                        <Check className="w-3.5 h-3.5 text-[#7C6EF0]" />
+                        <Check className="w-3.5 h-3.5 text-[#0B3333] dark:text-emerald-400" />
                       )}
                     </button>
                   ))}
@@ -547,15 +560,15 @@ export default function DashboardPage() {
             {/* Quick Action Links */}
             <Link
               href="/purchase-orders"
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-[#EEEDF5] dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-semibold text-[#1B1B1F] dark:text-white hover:border-[#7C6EF0] hover:text-[#7C6EF0] transition-colors shadow-xs"
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs sm:text-sm font-semibold text-slate-800 dark:text-slate-200 hover:border-slate-300 dark:hover:border-slate-700 transition-colors"
             >
-              <FileDown className="w-4 h-4 stroke-[1.8]" />
+              <FileDown className="w-4 h-4 text-slate-500 dark:text-slate-400 stroke-[1.8]" />
               <span>New PO</span>
             </Link>
 
             <Link
               href="/outbound-orders"
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#7C6EF0] text-white text-sm font-semibold hover:bg-[#6C5CE7] transition-all shadow-sm shadow-[#7C6EF0]/20"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#0B3333] hover:bg-[#072525] active:bg-[#041a1a] text-white text-xs sm:text-sm font-semibold transition-colors shadow-xs"
             >
               <Plus className="w-4 h-4 stroke-[2.5]" />
               <span>New Sales Order</span>
@@ -563,81 +576,143 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 1. KPI Cards Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-          {metrics.map((m, idx) => (
-            <Link
-              key={idx}
-              href={m.href}
-              className="bg-white dark:bg-slate-900 rounded-2xl border border-[#EEEDF5] dark:border-slate-800 p-5 hover:border-[#C7BFFA] dark:hover:border-slate-700 transition-all group block shadow-xs"
+        {/* Error State Banner */}
+        {hasError && (
+          <div className="p-4 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 flex items-center justify-between gap-3 text-xs sm:text-sm text-rose-700 dark:text-rose-400">
+            <div className="flex items-center gap-2.5">
+              <AlertCircle className="w-5 h-5 flex-shrink-0" />
+              <span>
+                {language === 'id'
+                  ? 'Gagal memuat sebagian data analitik. Pastikan koneksi server backend stabil.'
+                  : 'Failed to load some dashboard metrics. Please verify the backend server connection.'}
+              </span>
+            </div>
+            <button
+              onClick={() => loadStats()}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-800 text-xs font-semibold text-rose-700 dark:text-rose-400 hover:bg-rose-100/50 cursor-pointer transition-colors"
             >
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-[#8B8B99] dark:text-slate-400">
-                  {m.title}
-                </span>
-                <div className="w-7 h-7 rounded-full border border-[#EEEDF5] dark:border-slate-800 flex items-center justify-center text-[#8B8B99] dark:text-slate-400 group-hover:text-[#7C6EF0] group-hover:border-[#C7BFFA] transition-colors">
-                  <ArrowUpRight className="w-3.5 h-3.5" />
+              <RotateCw className="w-3.5 h-3.5" />
+              <span>{language === 'id' ? 'Coba Lagi' : 'Retry'}</span>
+            </button>
+          </div>
+        )}
+
+        {/* 1. KPI Cards Row (Loading Skeleton or Clean Monochromatic Cards) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+          {isLoading
+            ? Array.from({ length: 5 }).map((_, idx) => (
+                <div
+                  key={idx}
+                  className={`bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 animate-pulse ${
+                    idx > 0 && !showAllMetrics ? 'hidden lg:block' : 'block'
+                  } ${idx === 0 && !showAllMetrics ? 'sm:col-span-2 lg:col-span-1' : ''}`}
+                >
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="h-3 w-20 bg-slate-200 dark:bg-slate-800 rounded" />
+                    <div className="w-6 h-6 bg-slate-200 dark:bg-slate-800 rounded-full" />
+                  </div>
+                  <div className="h-8 w-24 bg-slate-200 dark:bg-slate-800 rounded mb-4" />
+                  <div className="h-4 w-32 bg-slate-200 dark:bg-slate-800 rounded" />
                 </div>
-              </div>
-
-              <div className="mt-2">
-                <p className="text-3xl font-extrabold text-[#1B1B1F] dark:text-white tracking-tight">
-                  {m.value}
-                </p>
-              </div>
-
-              <div className="mt-3 flex items-center gap-1.5 min-w-0">
-                <span
-                  className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[11px] font-semibold shrink-0 ${
-                    m.isPositive
-                      ? 'bg-[#E4F7EC] text-[#1FAA59]'
-                      : 'bg-[#FBE8EA] text-[#E0475C]'
+              ))
+            : metrics.map((m, idx) => (
+                <Link
+                  key={idx}
+                  href={m.href}
+                  className={`bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 hover:border-slate-300 dark:hover:border-slate-700 transition-colors group ${
+                    idx === 0
+                      ? !showAllMetrics
+                        ? 'block sm:col-span-2 lg:col-span-1'
+                        : 'block'
+                      : !showAllMetrics
+                      ? 'hidden lg:block'
+                      : 'block'
                   }`}
                 >
-                  {m.change.startsWith('-') ? (
-                    <ArrowDown className="w-2.5 h-2.5 stroke-[2.5]" />
-                  ) : (
-                    <ArrowUp className="w-2.5 h-2.5 stroke-[2.5]" />
-                  )}
-                  {m.change}
-                </span>
-                <span className="text-xs text-[#8B8B99] dark:text-slate-400 truncate">
-                  {m.comparisonLabel}
-                </span>
-              </div>
-            </Link>
-          ))}
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      {m.title}
+                    </span>
+                    <div className="w-7 h-7 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-center text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200 transition-colors">
+                      <ArrowUpRight className="w-3.5 h-3.5" />
+                    </div>
+                  </div>
+
+                  <div className="mt-2">
+                    <p className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight font-mono tabular-nums">
+                      {m.value}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 mt-2 min-w-0">
+                    <span
+                      className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold font-sans tabular-nums shrink-0 ${
+                        m.isPositive
+                          ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
+                          : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
+                      }`}
+                    >
+                      {m.isPositive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                      {m.change}
+                    </span>
+                    <span className="text-[11px] text-slate-400 dark:text-slate-500 truncate">
+                      {m.comparisonLabel}
+                    </span>
+                  </div>
+                </Link>
+              ))}
+        </div>
+
+        {/* Responsive Toggle for Metric Cards */}
+        <div className="lg:hidden">
+          <button
+            type="button"
+            onClick={() => setShowAllMetrics((prev) => !prev)}
+            aria-expanded={showAllMetrics}
+            className="w-full py-2.5 px-4 rounded-xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60 shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            <span>
+              {showAllMetrics
+                ? (language === 'id' ? 'Sembunyikan metrik' : 'Show less metrics')
+                : (language === 'id' ? 'Lihat 4 metrik lainnya' : 'Show 4 more metrics')}
+            </span>
+            {showAllMetrics ? (
+              <ChevronUp className="w-3.5 h-3.5 stroke-[2]" />
+            ) : (
+              <ChevronDown className="w-3.5 h-3.5 stroke-[2]" />
+            )}
+          </button>
         </div>
 
         {/* 2. Charts Row */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Section 7: Bar Chart Card — Real Inbound vs Outbound Flow */}
-          <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-2xl border border-[#EEEDF5] dark:border-slate-800 p-6 shadow-xs flex flex-col justify-between transition-colors">
+          {/* Section: Bar Chart Card — Real Inbound vs Outbound Flow */}
+          <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 flex flex-col justify-between transition-colors">
             {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#EEEDF5] dark:border-slate-800">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200 dark:border-slate-800">
               <div className="flex items-center gap-2.5 flex-wrap">
                 <div>
-                  <h2 className="text-base font-bold text-[#1B1B1F] dark:text-white">
+                  <h2 className="text-base font-bold text-slate-900 dark:text-white">
                     {t('chartFlowTitle')}
                   </h2>
-                  <p className="text-xs text-[#8B8B99] dark:text-slate-400 mt-0.5">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                     {t('chartFlowSubtitle')}
                   </p>
                 </div>
-                <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-[#F4F3FF] dark:bg-slate-800 text-[#7C6EF0] dark:text-[#A78BFA] border border-[#EEEDF5] dark:border-slate-700">
+                <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                   {selectedDateLabel}
                 </span>
               </div>
 
               <div className="flex items-center gap-4 flex-wrap sm:flex-nowrap">
                 {/* Dots Legend */}
-                <div className="flex items-center gap-3 text-xs text-[#8B8B99] dark:text-slate-400 whitespace-nowrap">
+                <div className="flex items-center gap-3 text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap">
                   <div className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#7C6EF0] shrink-0" />
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#0B3333] dark:bg-emerald-500 shrink-0" />
                     <span>{t('inboundIntake')}</span>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#C7BFFA] shrink-0" />
+                    <span className="w-2.5 h-2.5 rounded-full bg-slate-400 dark:bg-slate-500 shrink-0" />
                     <span>{t('outboundFulfillment')}</span>
                   </div>
                 </div>
@@ -646,7 +721,7 @@ export default function DashboardPage() {
                 <select
                   value={chartPeriod}
                   onChange={(e) => setChartPeriod(e.target.value as 'monthly' | 'daily')}
-                  className="px-3 py-1 text-xs rounded-full border border-[#EEEDF5] dark:border-slate-700 text-[#1B1B1F] dark:text-slate-200 bg-white dark:bg-slate-800 focus:outline-none focus:ring-1 focus:ring-[#7C6EF0] cursor-pointer shrink-0"
+                  className="px-3 py-1 text-xs rounded-lg border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-900 focus:outline-none focus:ring-1 focus:ring-[#0B3333] cursor-pointer shrink-0"
                 >
                   <option value="monthly">{t('chartPeriodMonthly')}</option>
                   <option value="daily">{t('chartPeriodDaily')}</option>
@@ -662,22 +737,22 @@ export default function DashboardPage() {
                   style={{
                     left: `${((hoveredBarIndex + 0.5) / Math.max(flowPoints.length, 1)) * 100}%`,
                   }}
-                  className="absolute top-1 -translate-x-1/2 z-20 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl px-3 py-2 shadow-lg text-xs pointer-events-none transition-all"
+                  className="absolute top-1 -translate-x-1/2 z-20 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 shadow-md text-xs pointer-events-none transition-all"
                 >
-                  <p className="text-[11px] font-bold text-[#1B1B1F] dark:text-white">
+                  <p className="text-[11px] font-bold text-slate-900 dark:text-white font-mono">
                     {flowPoints[hoveredBarIndex].label} {flowPoints[hoveredBarIndex].date ? `(${flowPoints[hoveredBarIndex].date})` : ''}
                   </p>
                   <div className="flex items-center gap-2 mt-1 text-[11px]">
-                    <span className="text-[#7C6EF0] font-semibold">
+                    <span className="text-[#0B3333] dark:text-emerald-400 font-semibold font-mono">
                       +{flowPoints[hoveredBarIndex].inbound} In
                     </span>
-                    <span className="text-[#8B8B99] dark:text-slate-500">&bull;</span>
-                    <span className="text-[#A78BFA] dark:text-slate-300 font-semibold">
+                    <span className="text-slate-400 dark:text-slate-600">&bull;</span>
+                    <span className="text-slate-600 dark:text-slate-300 font-semibold font-mono">
                       -{flowPoints[hoveredBarIndex].outbound} Out
                     </span>
                   </div>
                   {/* Pointer triangle */}
-                  <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white dark:bg-slate-800 border-b border-r border-[#EEEDF5] dark:border-slate-700 rotate-45" />
+                  <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white dark:bg-slate-900 border-b border-r border-slate-200 dark:border-slate-700 rotate-45" />
                 </div>
               )}
 
@@ -686,10 +761,10 @@ export default function DashboardPage() {
                 {[maxBarVal, Math.round(maxBarVal * 0.66), Math.round(maxBarVal * 0.33), 0].map(
                   (val, idx) => (
                     <div key={idx} className="flex items-center gap-3">
-                      <span className="text-[11px] text-[#8B8B99] dark:text-slate-500 w-8 text-right font-mono">
+                      <span className="text-[11px] text-slate-400 dark:text-slate-500 w-8 text-right font-mono tabular-nums">
                         {val}
                       </span>
-                      <div className="flex-1 border-b border-[#EEEDF5] dark:border-slate-800/80" />
+                      <div className="flex-1 border-b border-slate-100 dark:border-slate-800" />
                     </div>
                   )
                 )}
@@ -697,62 +772,68 @@ export default function DashboardPage() {
 
               {/* Bars Overlay */}
               <div className="absolute inset-0 pt-7 pl-11 pr-3 pb-6 flex items-end justify-between gap-1 sm:gap-3">
-                {flowPoints.map((item, idx) => {
-                  const inHeightPct = maxBarVal > 0 ? (item.inbound / maxBarVal) * 100 : 0;
-                  const outHeightPct = maxBarVal > 0 ? (item.outbound / maxBarVal) * 100 : 0;
-                  const isHovered = hoveredBarIndex === idx;
+                {flowPoints.length === 0 ? (
+                  <div className="w-full h-full flex items-center justify-center text-xs text-slate-400">
+                    {t('chartNoData')}
+                  </div>
+                ) : (
+                  flowPoints.map((item, idx) => {
+                    const inHeightPct = maxBarVal > 0 ? (item.inbound / maxBarVal) * 100 : 0;
+                    const outHeightPct = maxBarVal > 0 ? (item.outbound / maxBarVal) * 100 : 0;
+                    const isHovered = hoveredBarIndex === idx;
 
-                  return (
-                    <div
-                      key={idx}
-                      onMouseEnter={() => setHoveredBarIndex(idx)}
-                      onMouseLeave={() => setHoveredBarIndex(null)}
-                      className="flex-1 flex flex-col items-center h-full justify-end cursor-pointer group"
-                    >
-                      <div className="w-full max-w-[36px] flex items-end justify-center gap-1 h-[140px]">
-                        {/* Inbound Bar */}
-                        <div
-                          style={{ height: `${Math.max(inHeightPct, item.inbound > 0 ? 5 : 2)}%` }}
-                          className={`w-full bg-[#7C6EF0] rounded-t-md transition-all ${
-                            isHovered
-                              ? 'opacity-100 ring-2 ring-[#7C6EF0]/40 brightness-110'
-                              : 'opacity-85 group-hover:opacity-100'
-                          }`}
-                        />
-                        {/* Outbound Bar */}
-                        <div
-                          style={{ height: `${Math.max(outHeightPct, item.outbound > 0 ? 5 : 2)}%` }}
-                          className={`w-full bg-[#C7BFFA] dark:bg-[#A78BFA] rounded-t-md transition-all ${
-                            isHovered
-                              ? 'opacity-100 ring-2 ring-[#C7BFFA]/40 brightness-110'
-                              : 'opacity-85 group-hover:opacity-100'
-                          }`}
-                        />
-                      </div>
-                      {/* X-axis Label */}
-                      <span
-                        className={`text-[11px] font-mono mt-2 transition-colors ${
-                          isHovered
-                            ? 'text-[#7C6EF0] font-bold'
-                            : 'text-[#8B8B99] dark:text-slate-400'
-                        }`}
+                    return (
+                      <div
+                        key={idx}
+                        onMouseEnter={() => setHoveredBarIndex(idx)}
+                        onMouseLeave={() => setHoveredBarIndex(null)}
+                        className="flex-1 flex flex-col items-center h-full justify-end cursor-pointer group"
                       >
-                        {item.label}
-                      </span>
-                    </div>
-                  );
-                })}
+                        <div className="w-full max-w-[36px] flex items-end justify-center gap-1 h-[140px]">
+                          {/* Inbound Bar (Dark Teal) */}
+                          <div
+                            style={{ height: `${Math.max(inHeightPct, item.inbound > 0 ? 5 : 2)}%` }}
+                            className={`w-full bg-[#0B3333] dark:bg-emerald-600 rounded-t transition-all ${
+                              isHovered
+                                ? 'opacity-100 ring-2 ring-[#0B3333]/30 brightness-110'
+                                : 'opacity-90 group-hover:opacity-100'
+                            }`}
+                          />
+                          {/* Outbound Bar (Slate) */}
+                          <div
+                            style={{ height: `${Math.max(outHeightPct, item.outbound > 0 ? 5 : 2)}%` }}
+                            className={`w-full bg-slate-400 dark:bg-slate-500 rounded-t transition-all ${
+                              isHovered
+                                ? 'opacity-100 ring-2 ring-slate-400/40 brightness-110'
+                                : 'opacity-85 group-hover:opacity-100'
+                            }`}
+                          />
+                        </div>
+                        {/* X-axis Label */}
+                        <span
+                          className={`text-[11px] font-mono mt-2 transition-colors ${
+                            isHovered
+                              ? 'text-[#0B3333] dark:text-emerald-400 font-bold'
+                              : 'text-slate-500 dark:text-slate-400'
+                          }`}
+                        >
+                          {item.label}
+                        </span>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
           </div>
 
-          {/* Section 8: Donut Chart Card — Real Warehouse Capacity */}
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-[#EEEDF5] dark:border-slate-800 p-6 shadow-xs flex flex-col justify-between transition-colors">
-            <div className="flex items-center justify-between pb-4 border-b border-[#EEEDF5] dark:border-slate-800">
-              <h2 className="text-base font-bold text-[#1B1B1F] dark:text-white">
+          {/* Section: Donut Chart Card — Real Warehouse Capacity */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 flex flex-col justify-between transition-colors">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">
                 {t('capacityTitle')}
               </h2>
-              <div className="w-7 h-7 rounded-full border border-[#EEEDF5] dark:border-slate-800 flex items-center justify-center text-[#8B8B99] dark:text-slate-400">
+              <div className="w-7 h-7 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-center text-slate-400">
                 <ArrowUpRight className="w-3.5 h-3.5" />
               </div>
             </div>
@@ -768,20 +849,20 @@ export default function DashboardPage() {
                         style={{ backgroundColor: donutColors[idx % donutColors.length] }}
                       />
                       <div className="flex flex-col min-w-0 flex-1">
-                        <span className="text-[#1B1B1F] dark:text-slate-200 font-medium truncate" title={wh.name}>
+                        <span className="text-slate-800 dark:text-slate-200 font-medium truncate" title={wh.name}>
                           {wh.name}
                         </span>
-                        <span className="text-[10px] text-[#8B8B99] dark:text-slate-400 font-mono">
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono tabular-nums">
                           {wh.current_stock.toLocaleString()} / {wh.capacity.toLocaleString()} {t('units')}
                         </span>
                       </div>
-                      <span className="text-[#8B8B99] dark:text-slate-400 ml-auto font-mono text-[11px] font-semibold flex-shrink-0">
+                      <span className="text-slate-600 dark:text-slate-300 ml-auto font-mono tabular-nums text-[11px] font-semibold flex-shrink-0">
                         {wh.current_stock > 0 && wh.percentage < 0.1 ? '<0.1%' : `${wh.percentage}%`}
                       </span>
                     </div>
                   ))
                 ) : (
-                  <div className="text-xs text-[#8B8B99] dark:text-slate-500 py-4">
+                  <div className="text-xs text-slate-500 dark:text-slate-400 py-4">
                     {t('noWarehousesConfigured')}
                   </div>
                 )}
@@ -796,8 +877,8 @@ export default function DashboardPage() {
                     cy="18"
                     r="15.915"
                     fill="transparent"
-                    stroke="#EEEDF5"
-                    className="stroke-[#EEEDF5] dark:stroke-slate-800"
+                    stroke="#E2E8F0"
+                    className="stroke-slate-100 dark:stroke-slate-800"
                     strokeWidth="3.2"
                   />
                   {/* Render dynamic warehouse segments based on actual capacity utilization */}
@@ -834,14 +915,14 @@ export default function DashboardPage() {
 
                 {/* Center text: perfectly visible in both light & dark mode */}
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
-                  <span className="text-2xl font-extrabold text-[#1B1B1F] dark:text-white tracking-tight">
+                  <span className="text-2xl font-extrabold text-slate-900 dark:text-white font-mono tabular-nums tracking-tight">
                     {capacityData
                       ? capacityData.total_on_hand > 0 && capacityData.utilization_rate < 0.1
                         ? '<0.1%'
                         : `${capacityData.utilization_rate}%`
                       : '0%'}
                   </span>
-                  <span className="text-[10px] uppercase font-semibold tracking-wider text-[#8B8B99] dark:text-slate-400">
+                  <span className="text-[10px] uppercase font-semibold tracking-wider text-slate-500 dark:text-slate-400">
                     {t('capacityUtilized')}
                   </span>
                 </div>
@@ -849,10 +930,10 @@ export default function DashboardPage() {
             </div>
 
             {/* Total Storage Capacity Footer */}
-            <div className="pt-3 border-t border-[#EEEDF5] dark:border-slate-800">
-              <div className="flex items-center justify-between text-xs text-[#8B8B99] dark:text-slate-400">
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-800">
+              <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
                 <span>{t('totalStorageCapacity')}</span>
-                <span className="font-semibold text-[#1B1B1F] dark:text-white">
+                <span className="font-semibold text-slate-900 dark:text-white font-mono tabular-nums">
                   {capacityData?.total_on_hand ? capacityData.total_on_hand.toLocaleString() : '0'} / {capacityData?.total_capacity ? capacityData.total_capacity.toLocaleString() : '0'} {t('units')}
                 </span>
               </div>
@@ -862,14 +943,14 @@ export default function DashboardPage() {
 
         {/* 3. Bottom Row: Real Transactions Table & Operational Goals */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Section 9: Real Transactions Table (NO dummy fallback!) */}
-          <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-2xl border border-[#EEEDF5] dark:border-slate-800 p-6 shadow-xs transition-colors">
-            <div className="flex items-center justify-between pb-4 border-b border-[#EEEDF5] dark:border-slate-800">
+          {/* Section: Real Transactions Table */}
+          <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 transition-colors">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
               <div>
-                <h2 className="text-base font-bold text-[#1B1B1F] dark:text-white">
+                <h2 className="text-base font-bold text-slate-900 dark:text-white">
                   {t('recentOpsTitle')}
                 </h2>
-                <p className="text-xs text-[#8B8B99] dark:text-slate-400 mt-0.5">
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                   {t('recentOpsSubtitle')}
                 </p>
               </div>
@@ -877,7 +958,7 @@ export default function DashboardPage() {
               <div className="flex items-center gap-3">
                 <Link
                   href="/inventory"
-                  className="text-xs font-semibold text-[#7C6EF0] hover:text-[#6C5CE7] flex items-center gap-1"
+                  className="text-xs font-semibold text-[#0B3333] dark:text-emerald-400 hover:underline flex items-center gap-1"
                 >
                   <span>{t('seeAll')}</span>
                   <ChevronRight className="w-3.5 h-3.5" />
@@ -889,45 +970,45 @@ export default function DashboardPage() {
               {movements.length === 0 ? (
                 /* Clean Empty State when database has no transactions */
                 <div className="py-12 flex flex-col items-center justify-center text-center">
-                  <div className="w-12 h-12 rounded-2xl bg-[#F4F3FF] dark:bg-slate-800 text-[#7C6EF0] flex items-center justify-center mb-3">
+                  <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mb-3">
                     <Inbox className="w-6 h-6 stroke-[1.8]" />
                   </div>
-                  <p className="text-sm font-semibold text-[#1B1B1F] dark:text-white">
+                  <p className="text-sm font-semibold text-slate-900 dark:text-white">
                     {t('noMovementsTitle')}
                   </p>
-                  <p className="text-xs text-[#8B8B99] dark:text-slate-400 max-w-xs mt-1">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs mt-1">
                     {t('noMovementsSubtitle')}
                   </p>
                 </div>
               ) : (
                 <table className="w-full text-left">
                   <thead>
-                    <tr className="border-b border-[#EEEDF5] dark:border-slate-800 text-[11px] font-semibold uppercase tracking-wider text-[#8B8B99] dark:text-slate-400">
-                      <th className="py-3.5 px-2">{t('colItemSku')}</th>
-                      <th className="py-3.5 px-3">{t('colType')}</th>
-                      <th className="py-3.5 px-3">{t('colLocation')}</th>
-                      <th className="py-3.5 px-3 text-right">{t('colQuantity')}</th>
-                      <th className="py-3.5 px-3 text-right">{t('colTime')}</th>
+                    <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      <th className="py-3 px-2">{t('colItemSku')}</th>
+                      <th className="py-3 px-3">{t('colType')}</th>
+                      <th className="py-3 px-3">{t('colLocation')}</th>
+                      <th className="py-3 px-3 text-right">{t('colQuantity')}</th>
+                      <th className="py-3 px-3 text-right">{t('colTime')}</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#EEEDF5] dark:divide-slate-800 text-xs">
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 text-xs">
                     {movements.map((mov) => {
                       const isPositive = mov.qty > 0;
                       return (
                         <tr
                           key={mov.id}
-                          className="hover:bg-[#F9F9FD] dark:hover:bg-slate-800/50 transition-colors"
+                          className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors"
                         >
                           <td className="py-3.5 px-2">
                             <div className="flex items-center gap-2.5">
-                              <div className="w-8 h-8 rounded-full bg-[#F4F3FF] dark:bg-slate-800 text-[#7C6EF0] flex items-center justify-center font-bold text-xs flex-shrink-0">
+                              <div className="w-8 h-8 rounded-lg bg-[#0B3333]/10 dark:bg-emerald-950/40 text-[#0B3333] dark:text-emerald-400 flex items-center justify-center font-bold text-xs flex-shrink-0">
                                 <Package className="w-4 h-4 stroke-[1.8]" />
                               </div>
                               <div>
-                                <p className="font-semibold text-[#1B1B1F] dark:text-white truncate max-w-[180px] sm:max-w-xs">
+                                <p className="font-semibold text-slate-900 dark:text-white truncate max-w-[180px] sm:max-w-xs">
                                   {mov.item_name}
                                 </p>
-                                <p className="text-[11px] font-mono text-[#8B8B99] dark:text-slate-400">
+                                <p className="text-[11px] font-mono text-slate-400 dark:text-slate-500">
                                   {mov.sku}
                                 </p>
                               </div>
@@ -938,10 +1019,10 @@ export default function DashboardPage() {
                             <span
                               className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${
                                 mov.type === 'Inbound'
-                                  ? 'bg-[#E4F7EC] text-[#1FAA59]'
+                                  ? 'bg-teal-50 text-teal-800 dark:bg-teal-950/40 dark:text-teal-300 border border-teal-200/50 dark:border-teal-800/40'
                                   : mov.type === 'Outbound'
-                                  ? 'bg-[#FBE8EA] text-[#E0475C]'
-                                  : 'bg-[#F4F3FF] text-[#7C6EF0]'
+                                  ? 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+                                  : 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200/50 dark:border-amber-800/40'
                               }`}
                             >
                               {mov.type}
@@ -949,21 +1030,21 @@ export default function DashboardPage() {
                           </td>
 
                           <td className="py-3.5 px-3">
-                            <p className="text-[#1B1B1F] dark:text-slate-200 font-medium truncate max-w-[140px]">
+                            <p className="text-slate-800 dark:text-slate-200 font-medium truncate max-w-[140px]">
                               {mov.warehouse}
                             </p>
-                            <p className="text-[11px] text-[#8B8B99] dark:text-slate-400 font-mono">
+                            <p className="text-[11px] text-slate-400 dark:text-slate-500 font-mono">
                               Bin {mov.location}
                             </p>
                           </td>
 
-                          <td className="py-3.5 px-3 text-right font-semibold font-mono">
-                            <span className={isPositive ? 'text-[#1FAA59]' : 'text-[#E0475C]'}>
+                          <td className="py-3.5 px-3 text-right font-semibold font-mono tabular-nums">
+                            <span className={isPositive ? 'text-teal-700 dark:text-teal-400' : 'text-slate-700 dark:text-slate-300'}>
                               {isPositive ? `+${mov.qty}` : mov.qty}
                             </span>
                           </td>
 
-                          <td className="py-3.5 px-3 text-right text-[#8B8B99] dark:text-slate-400 font-mono">
+                          <td className="py-3.5 px-3 text-right text-slate-500 dark:text-slate-400 font-mono tabular-nums">
                             {mov.time}
                           </td>
                         </tr>
@@ -975,13 +1056,13 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Section 10: Operational Targets (Dynamically reactive, 0% when empty) */}
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-[#EEEDF5] dark:border-slate-800 p-6 shadow-xs flex flex-col justify-between transition-colors">
-            <div className="flex items-center justify-between pb-4 border-b border-[#EEEDF5] dark:border-slate-800">
-              <h2 className="text-base font-bold text-[#1B1B1F] dark:text-white">
+          {/* Section: Operational Targets */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 flex flex-col justify-between transition-colors">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">
                 {t('targetsTitle')}
               </h2>
-              <div className="w-7 h-7 rounded-full border border-[#EEEDF5] dark:border-slate-800 flex items-center justify-center text-[#8B8B99] dark:text-slate-400">
+              <div className="w-7 h-7 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-center text-slate-400">
                 <TrendingUp className="w-3.5 h-3.5" />
               </div>
             </div>
@@ -991,16 +1072,16 @@ export default function DashboardPage() {
               {/* Goal 1: Same-Day Dispatch */}
               <div>
                 <div className="flex items-center justify-between text-xs mb-1.5">
-                  <span className="font-semibold text-[#1B1B1F] dark:text-white">
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">
                     {t('targetSameDay')}
                   </span>
-                  <span className="text-[#8B8B99] dark:text-slate-400 font-mono text-[11px]">
+                  <span className="text-slate-500 dark:text-slate-400 font-mono tabular-nums text-[11px]">
                     {soStats && soStats.total_orders > 0
                       ? `${Math.round((soStats.shipped_orders / soStats.total_orders) * 100)}%`
                       : '0%'}
                   </span>
                 </div>
-                <div className="w-full h-3 bg-[#F0EFFB] dark:bg-slate-800 rounded-full overflow-hidden">
+                <div className="w-full h-2.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                   <div
                     style={{
                       width: `${
@@ -1009,7 +1090,7 @@ export default function DashboardPage() {
                           : 0
                       }%`,
                     }}
-                    className="h-full bg-[#7C6EF0] rounded-full transition-all duration-500"
+                    className="h-full bg-[#0B3333] dark:bg-emerald-500 rounded-full transition-all duration-500"
                   />
                 </div>
               </div>
@@ -1017,16 +1098,16 @@ export default function DashboardPage() {
               {/* Goal 2: Inbound PO Intake */}
               <div>
                 <div className="flex items-center justify-between text-xs mb-1.5">
-                  <span className="font-semibold text-[#1B1B1F] dark:text-white">
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">
                     {t('targetInbound')}
                   </span>
-                  <span className="text-[#8B8B99] dark:text-slate-400 font-mono text-[11px]">
+                  <span className="text-slate-500 dark:text-slate-400 font-mono tabular-nums text-[11px]">
                     {poStats && poStats.total_orders > 0
                       ? `${Math.round((poStats.completed_orders / poStats.total_orders) * 100)}%`
                       : '0%'}
                   </span>
                 </div>
-                <div className="w-full h-3 bg-[#F0EFFB] dark:bg-slate-800 rounded-full overflow-hidden">
+                <div className="w-full h-2.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                   <div
                     style={{
                       width: `${
@@ -1035,7 +1116,7 @@ export default function DashboardPage() {
                           : 0
                       }%`,
                     }}
-                    className="h-full bg-[#7C6EF0] rounded-full transition-all duration-500"
+                    className="h-full bg-[#0B3333] dark:bg-emerald-500 rounded-full transition-all duration-500"
                   />
                 </div>
               </div>
@@ -1043,17 +1124,17 @@ export default function DashboardPage() {
               {/* Goal 3: Storage Bin Utilization */}
               <div>
                 <div className="flex items-center justify-between text-xs mb-1.5">
-                  <span className="font-semibold text-[#1B1B1F] dark:text-white">
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">
                     {t('targetBinUtil')}
                   </span>
-                  <span className="text-[#8B8B99] dark:text-slate-400 font-mono text-[11px]">
+                  <span className="text-slate-500 dark:text-slate-400 font-mono tabular-nums text-[11px]">
                     {capacityData ? `${capacityData.utilization_rate}%` : '0%'}
                   </span>
                 </div>
-                <div className="w-full h-3 bg-[#F0EFFB] dark:bg-slate-800 rounded-full overflow-hidden">
+                <div className="w-full h-2.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                   <div
                     style={{ width: `${capacityData ? capacityData.utilization_rate : 0}%` }}
-                    className="h-full bg-[#7C6EF0] rounded-full transition-all duration-500"
+                    className="h-full bg-[#0B3333] dark:bg-emerald-500 rounded-full transition-all duration-500"
                   />
                 </div>
               </div>
@@ -1061,24 +1142,24 @@ export default function DashboardPage() {
               {/* Goal 4: Ledger Audit Activity */}
               <div>
                 <div className="flex items-center justify-between text-xs mb-1.5">
-                  <span className="font-semibold text-[#1B1B1F] dark:text-white">
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">
                     {t('targetLedger')}
                   </span>
-                  <span className="text-[#8B8B99] dark:text-slate-400 font-mono text-[11px]">
+                  <span className="text-slate-500 dark:text-slate-400 font-mono tabular-nums text-[11px]">
                     {movements.length > 0 ? t('active') : t('standby')}
                   </span>
                 </div>
-                <div className="w-full h-3 bg-[#F0EFFB] dark:bg-slate-800 rounded-full overflow-hidden">
+                <div className="w-full h-2.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                   <div
                     style={{ width: movements.length > 0 ? '100%' : '0%' }}
-                    className="h-full bg-[#7C6EF0] rounded-full transition-all duration-500"
+                    className="h-full bg-[#0B3333] dark:bg-emerald-500 rounded-full transition-all duration-500"
                   />
                 </div>
               </div>
             </div>
 
-            <div className="pt-3 border-t border-[#EEEDF5] dark:border-slate-800">
-              <p className="text-[11px] text-[#8B8B99] dark:text-slate-400 text-center">
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-800">
+              <p className="text-[11px] text-slate-400 dark:text-slate-500 text-center">
                 {t('targetsFooter')}
               </p>
             </div>

@@ -38,12 +38,12 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	user, token, expiresAt, err := h.authService.Login(c.Request.Context(), req)
 	if err != nil {
-		if errors.Is(err, service.ErrInvalidCredentials) {
-			utils.ErrorResponse(c, http.StatusUnauthorized, "Invalid email or password", nil)
+		if errors.Is(err, service.ErrAccountLocked) {
+			utils.ErrorResponse(c, http.StatusTooManyRequests, "Account temporarily locked due to too many failed attempts. Try again in 15 minutes.", nil)
 			return
 		}
-		if errors.Is(err, service.ErrAccountInactive) {
-			utils.ErrorResponse(c, http.StatusForbidden, "Account is disabled. Contact administrator", nil)
+		if errors.Is(err, service.ErrInvalidCredentials) || errors.Is(err, service.ErrAccountInactive) {
+			utils.ErrorResponse(c, http.StatusUnauthorized, "Invalid email or password", nil)
 			return
 		}
 		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to authenticate", err.Error())

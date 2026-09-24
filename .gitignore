@@ -32,6 +32,7 @@ daftar-ancaman-keamanan-website.md
 # ==========================================
 backend/.env
 backend/server
+backend/api
 backend/bin/
 backend/*.exe
 backend/*.exe~

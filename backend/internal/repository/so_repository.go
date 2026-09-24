@@ -230,13 +230,22 @@ func (r *mongoSORepository) ListSOs(ctx context.Context, params models.SOQueryPa
 		return nil, 0, err
 	}
 
-	findOptions := options.Find().SetSort(bson.D{{Key: "created_at", Value: -1}})
+	limit := int64(20)
 	if params.Limit > 0 {
-		findOptions.SetLimit(params.Limit)
-		if params.Page > 1 {
-			findOptions.SetSkip((params.Page - 1) * params.Limit)
-		}
+		limit = params.Limit
 	}
+	if limit > 500 {
+		limit = 500
+	}
+	page := int64(1)
+	if params.Page > 0 {
+		page = params.Page
+	}
+
+	findOptions := options.Find().
+		SetSort(bson.D{{Key: "created_at", Value: -1}}).
+		SetLimit(limit).
+		SetSkip((page - 1) * limit)
 
 	cursor, err := r.soColl.Find(ctx, filter, findOptions)
 	if err != nil {

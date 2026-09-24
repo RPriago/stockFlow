@@ -235,6 +235,9 @@ func (r *mongoPORepository) ListPOs(ctx context.Context, params models.POQueryPa
 	if params.Limit > 0 {
 		limit = params.Limit
 	}
+	if limit > 500 {
+		limit = 500
+	}
 	page := int64(1)
 	if params.Page > 0 {
 		page = params.Page

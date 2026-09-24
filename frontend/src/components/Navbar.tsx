@@ -256,8 +256,8 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
 
   return (
     <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-3 sm:px-6 lg:px-8 sticky top-0 z-30 transition-colors">
-      {/* Left: Mobile hamburger */}
-      <div className="flex items-center gap-2 sm:gap-3">
+      {/* Left: Mobile hamburger & Persistent Desktop Search */}
+      <div className="flex items-center gap-2 sm:gap-3 flex-1 max-w-md">
         <button
           onClick={onMenuToggle}
           className="lg:hidden p-2 rounded-xl text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
@@ -265,12 +265,44 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
         >
           <Menu className="w-5 h-5 stroke-[1.8]" />
         </button>
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const q = searchQuery.trim();
+            if (q) {
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('app:search', { detail: q }));
+              }
+              router.push(`/products?search=${encodeURIComponent(q)}`);
+            }
+          }}
+          className="relative w-full hidden sm:block"
+        >
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search by SKU, product name, or warehouse..."
+            className="w-full pl-9 pr-4 py-2 text-xs bg-slate-50/70 dark:bg-slate-950 border border-slate-200/90 dark:border-slate-800 rounded-full text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] dark:focus:border-emerald-500 transition-colors"
+          />
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none stroke-[1.8]" />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </form>
       </div>
 
-      {/* Right: Search, Language Switcher, Notifications, Profile */}
+      {/* Right: Mobile Search, Notifications, Profile */}
       <div className="flex items-center gap-2 sm:gap-3.5 ml-auto">
-        {/* Search button / input */}
-        <div className="relative">
+        {/* Mobile search button */}
+        <div className="relative sm:hidden">
           {showSearch ? (
             <form
               onSubmit={(e) => {
@@ -300,16 +332,16 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
                     setSearchQuery('');
                   }
                 }}
-                className="w-36 xs:w-48 sm:w-72 pl-8 sm:pl-9 pr-7 sm:pr-8 py-1.5 text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-full text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] dark:focus:border-emerald-500 transition-colors"
+                className="w-40 pl-8 pr-7 py-1.5 text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-full text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
               />
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 sm:left-3 pointer-events-none stroke-[1.8]" />
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 pointer-events-none stroke-[1.8]" />
               <button
                 type="button"
                 onClick={() => {
                   setShowSearch(false);
                   setSearchQuery('');
                 }}
-                className="absolute right-2 sm:right-2.5 p-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer"
+                className="absolute right-2 p-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer"
               >
                 <X className="w-3 h-3" />
               </button>
@@ -320,8 +352,8 @@ export default function Navbar({ onMenuToggle }: NavbarProps) {
                 setShowSearch(true);
                 setTimeout(() => searchInputRef.current?.focus(), 50);
               }}
-              className="w-9 h-9 rounded-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:border-slate-300 dark:hover:border-slate-700 transition-colors cursor-pointer"
-              title={t('search')}
+              className="w-8 h-8 rounded-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
+              aria-label={t('search')}
             >
               <Search className="w-4 h-4 stroke-[1.8]" />
             </button>

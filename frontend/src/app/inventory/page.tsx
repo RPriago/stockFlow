@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import FloatingToast from '@/components/FloatingToast';
 import { useAuth } from '@/context/AuthContext';
@@ -21,9 +21,9 @@ import {
   History,
   ArrowDownLeft,
   ArrowUpRight,
+  ArrowDownRight,
   Search,
   AlertTriangle,
-  CheckCircle2,
   Filter,
   Warehouse as WarehouseIcon,
   MapPin,
@@ -31,7 +31,11 @@ import {
   X,
   Loader2,
   ShieldAlert,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
+
+const createRefCode = (prefix: string) => `${prefix}-${Date.now().toString().slice(-6)}`;
 
 export default function InventoryPage() {
   const { role } = useAuth();
@@ -58,6 +62,95 @@ export default function InventoryPage() {
   const [lowStockOnly, setLowStockOnly] = useState(false);
   const [movementTypeFilter, setMovementTypeFilter] = useState<string>('');
 
+  // Responsive KPI metrics collapse state
+  const [showAllMetrics, setShowAllMetrics] = useState(false);
+  const [currentTime, setCurrentTime] = useState<number>(0);
+
+  useEffect(() => {
+    setCurrentTime(Date.now());
+  }, []);
+
+  // Precise 7-day metric calculations (rounded to 1 decimal place)
+  const invMetrics = useMemo(() => {
+    const now = currentTime || 0;
+    const sevenDaysAgo = now > 0 ? now - 7 * 24 * 60 * 60 * 1000 : 0;
+
+    const calcDiff = (current: number, recentCount: number, isGoodWhenUp: boolean = true) => {
+      const baseline = current - recentCount;
+      let change = '+0.0%';
+      let isPositive = isGoodWhenUp;
+
+      if (baseline > 0) {
+        const pct = (recentCount / baseline) * 100;
+        change = `+${pct.toFixed(1)}%`;
+        isPositive = isGoodWhenUp;
+      } else if (current > 0) {
+        change = '+100.0%';
+        isPositive = isGoodWhenUp;
+      } else {
+        change = '+0.0%';
+        isPositive = true;
+      }
+      return { change, isPositive };
+    };
+
+    // Recent movements in 7 days
+    const recentMovements = movements.filter(m => sevenDaysAgo > 0 && new Date(m.created_at).getTime() >= sevenDaysAgo);
+
+    // 1. Total On Hand
+    const currentOnHand = stats?.total_on_hand ?? items.reduce((sum, i) => sum + (Number(i.quantity_on_hand) || 0), 0);
+    const netInflow7d = recentMovements.reduce((acc, m) => {
+      if (m.movement_type === 'stock_in') return acc + m.quantity;
+      if (m.movement_type === 'stock_out') return acc - m.quantity;
+      return acc;
+    }, 0);
+    const onHandBaseline = Math.max(0, currentOnHand - netInflow7d);
+    let onHandChange = '+0.0%';
+    let onHandIsPositive = true;
+    if (onHandBaseline > 0) {
+      const pct = ((currentOnHand - onHandBaseline) / onHandBaseline) * 100;
+      onHandChange = `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`;
+      onHandIsPositive = pct >= 0;
+    } else if (currentOnHand > 0) {
+      onHandChange = '+100.0%';
+      onHandIsPositive = true;
+    }
+
+    // 2. Available Stock
+    const currentAvailable = stats?.total_available ?? items.reduce((sum, i) => sum + (Number(i.quantity_available) || 0), 0);
+    const availableMetric = calcDiff(currentAvailable, Math.max(0, netInflow7d), true);
+
+    // 3. Reserved Stock
+    const currentReserved = stats?.total_reserved ?? items.reduce((sum, i) => sum + (Number(i.quantity_reserved) || 0), 0);
+    const reservedMetric = calcDiff(currentReserved, 0, true);
+
+    // 4. Low Stock items count (fewer is better, so increase is negative/red, decrease is positive/emerald)
+    const currentLowStock = stats?.low_stock_items_count ?? items.filter(i => (i.quantity_on_hand || 0) <= (i.min_stock || 0)).length;
+    const lowStockMetric = calcDiff(currentLowStock, 0, false);
+
+    // 5. Movements / Mutations Today (compared to daily average over 7 days)
+    const movementsToday = stats?.movements_today ?? 0;
+    const avgDaily7d = recentMovements.length > 0 ? recentMovements.length / 7 : 0;
+    let moveChange = '+0.0%';
+    let moveIsPositive = true;
+    if (avgDaily7d > 0) {
+      const pct = ((movementsToday - avgDaily7d) / avgDaily7d) * 100;
+      moveChange = `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`;
+      moveIsPositive = pct >= 0;
+    } else if (movementsToday > 0) {
+      moveChange = '+100.0%';
+      moveIsPositive = true;
+    }
+
+    return {
+      onHand: { value: currentOnHand, change: onHandChange, isPositive: onHandIsPositive },
+      available: { value: currentAvailable, ...availableMetric },
+      reserved: { value: currentReserved, ...reservedMetric },
+      lowStock: { value: currentLowStock, ...lowStockMetric },
+      mutations: { value: movementsToday, change: moveChange, isPositive: moveIsPositive },
+    };
+  }, [items, movements, stats, currentTime]);
+
   // Alerts
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -80,9 +173,7 @@ export default function InventoryPage() {
   const [formNotes, setFormNotes] = useState('');
   const [modalError, setModalError] = useState<string | null>(null);
 
-  // Track max available stock for Stock Out
-  const [maxAvailableForSelected, setMaxAvailableForSelected] = useState<number | null>(null);
-  const [currentOnHandForAdjust, setCurrentOnHandForAdjust] = useState<number>(0);
+
 
   // Auto-dismiss alerts
   useEffect(() => {
@@ -146,8 +237,8 @@ export default function InventoryPage() {
       if (res.data) {
         setItems(res.data.items || []);
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to fetch inventory balances');
+    } catch (err: unknown) {
+      setErrorMsg((err as Error).message || 'Failed to fetch inventory balances');
     }
   }, [selectedWarehouseId, lowStockOnly, searchQuery]);
 
@@ -175,8 +266,8 @@ export default function InventoryPage() {
       if (res.data) {
         setMovements(res.data.movements || []);
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to fetch movements history');
+    } catch (err: unknown) {
+      setErrorMsg((err as Error).message || 'Failed to fetch movements history');
     } finally {
       setIsMovementsLoading(false);
     }
@@ -189,25 +280,35 @@ export default function InventoryPage() {
       await Promise.all([loadMetadata(), fetchInventory(), fetchStats(), fetchMovements()]);
       setIsLoading(false);
     };
-    init();
+    const timer = setTimeout(() => {
+      void init();
+    }, 0);
+    return () => clearTimeout(timer);
   }, [loadMetadata, fetchInventory, fetchStats, fetchMovements]);
 
   // Re-fetch balances on filter changes
   useEffect(() => {
-    fetchInventory();
+    const timer = setTimeout(() => {
+      void fetchInventory();
+    }, 0);
+    return () => clearTimeout(timer);
   }, [fetchInventory]);
 
   // Re-fetch movements when tab or filter changes
   useEffect(() => {
     if (activeTab === 'ledger') {
-      fetchMovements();
+      const timer = setTimeout(() => {
+        void fetchMovements();
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [activeTab, fetchMovements]);
 
   // Real-time auto-refresh across browsers
   useEffect(() => {
-    const handleSync = (e: any) => {
-      const resource = e?.detail?.resource;
+    const handleSync = (e: Event) => {
+      const customEvt = e as CustomEvent<{ resource?: string }>;
+      const resource = customEvt?.detail?.resource;
       if (
         !resource ||
         resource === 'inventory' ||
@@ -231,17 +332,19 @@ export default function InventoryPage() {
 
   // When formWhId changes, prefetch its locations
   useEffect(() => {
-    if (formWhId) {
-      fetchLocationsForWh(formWhId).then((locs) => {
+    if (!formWhId) return;
+    const timer = setTimeout(() => {
+      void fetchLocationsForWh(formWhId).then((locs) => {
         if (locs.length > 0 && (!formLocId || !locs.some((l) => l.id === formLocId))) {
           setFormLocId(locs[0].id);
         }
       });
-    }
+    }, 0);
+    return () => clearTimeout(timer);
   }, [formWhId, fetchLocationsForWh, formLocId]);
 
-  // Calculate available stock when in Stock Out or Adjust
-  useEffect(() => {
+  // Derived stock availability for Stock Out and Adjust
+  const { maxAvailableForSelected, currentOnHandForAdjust } = useMemo(() => {
     if (formWhId && formLocId && formProdId) {
       const match = items.find(
         (i) =>
@@ -251,16 +354,14 @@ export default function InventoryPage() {
           (formVariantId ? i.variant_id === formVariantId : !i.variant_id)
       );
       if (match) {
-        setMaxAvailableForSelected(match.quantity_available);
-        setCurrentOnHandForAdjust(match.quantity_on_hand);
-      } else {
-        setMaxAvailableForSelected(0);
-        setCurrentOnHandForAdjust(0);
+        return {
+          maxAvailableForSelected: match.quantity_available,
+          currentOnHandForAdjust: match.quantity_on_hand,
+        };
       }
-    } else {
-      setMaxAvailableForSelected(null);
-      setCurrentOnHandForAdjust(0);
+      return { maxAvailableForSelected: 0, currentOnHandForAdjust: 0 };
     }
+    return { maxAvailableForSelected: null, currentOnHandForAdjust: 0 };
   }, [formWhId, formLocId, formProdId, formVariantId, items]);
 
   // Open modals pre-populated from a table row
@@ -271,7 +372,7 @@ export default function InventoryPage() {
     setFormVariantId(item.variant_id || '');
     setFormQuantity(10);
     setFormRefType('manual');
-    setFormRefId('STOCK-IN-' + Math.floor(1000 + Math.random() * 9000));
+    setFormRefId(createRefCode('STOCK-IN'));
     setFormNotes(`Restock for ${item.product_name}`);
     setModalError(null);
     setShowStockInModal(true);
@@ -284,9 +385,8 @@ export default function InventoryPage() {
     setFormVariantId(item.variant_id || '');
     setFormQuantity(Math.min(5, Math.max(1, item.quantity_available)));
     setFormRefType('manual');
-    setFormRefId('STOCK-OUT-' + Math.floor(1000 + Math.random() * 9000));
+    setFormRefId(createRefCode('STOCK-OUT'));
     setFormNotes(`Dispatched from bin ${item.location_code}`);
-    setMaxAvailableForSelected(item.quantity_available);
     setModalError(null);
     setShowStockOutModal(true);
   };
@@ -296,7 +396,6 @@ export default function InventoryPage() {
     setFormLocId(item.location_id);
     setFormProdId(item.product_id);
     setFormVariantId(item.variant_id || '');
-    setCurrentOnHandForAdjust(item.quantity_on_hand);
     setFormActualQty(item.quantity_on_hand);
     setFormReason('Stock Opname discrepancy');
     setFormNotes(`Reconciliation for ${item.location_code}`);
@@ -330,7 +429,7 @@ export default function InventoryPage() {
     }
     setFormQuantity(20);
     setFormRefType('po');
-    setFormRefId('PO-' + Math.floor(1000 + Math.random() * 9000));
+    setFormRefId(createRefCode('PO'));
     setFormNotes('Inbound inventory intake');
     setModalError(null);
     setShowStockInModal(true);
@@ -344,7 +443,7 @@ export default function InventoryPage() {
     }
     setFormQuantity(5);
     setFormRefType('so');
-    setFormRefId('SO-' + Math.floor(1000 + Math.random() * 9000));
+    setFormRefId(createRefCode('SO'));
     setFormNotes('Customer order dispatch');
     setModalError(null);
     setShowStockOutModal(true);
@@ -407,8 +506,8 @@ export default function InventoryPage() {
       setSuccessMsg(`Successfully stocked in ${qty} units!`);
       setShowStockInModal(false);
       await Promise.all([fetchInventory(), fetchStats(), fetchMovements()]);
-    } catch (err: any) {
-      setModalError(err.message || 'Failed to execute stock in');
+    } catch (err: unknown) {
+      setModalError((err as Error).message || 'Failed to execute stock in');
     } finally {
       setIsSubmitting(false);
     }
@@ -447,8 +546,8 @@ export default function InventoryPage() {
       setSuccessMsg(`Successfully dispatched ${qty} units!`);
       setShowStockOutModal(false);
       await Promise.all([fetchInventory(), fetchStats(), fetchMovements()]);
-    } catch (err: any) {
-      setModalError(err.message || 'Failed to execute stock out');
+    } catch (err: unknown) {
+      setModalError((err as Error).message || 'Failed to execute stock out');
     } finally {
       setIsSubmitting(false);
     }
@@ -500,8 +599,8 @@ export default function InventoryPage() {
       setSuccessMsg(`Inventory adjusted to ${actualQty} units.`);
       setShowAdjustModal(false);
       await Promise.all([fetchInventory(), fetchStats(), fetchMovements()]);
-    } catch (err: any) {
-      setModalError(err.message || 'Failed to adjust inventory');
+    } catch (err: unknown) {
+      setModalError((err as Error).message || 'Failed to adjust inventory');
     } finally {
       setIsSubmitting(false);
     }
@@ -534,7 +633,7 @@ export default function InventoryPage() {
           <div className="flex flex-wrap items-center gap-2.5">
             <button
               onClick={openNewStockOut}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-[#EEEDF5] dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-semibold text-[#1B1B1F] dark:text-white hover:border-[#7C6EF0] hover:text-[#7C6EF0] transition-colors shadow-xs cursor-pointer"
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors shadow-xs cursor-pointer"
             >
               <Minus className="w-4 h-4 stroke-[2]" />
               <span>{t('stockOutBtn')}</span>
@@ -542,15 +641,15 @@ export default function InventoryPage() {
             {canAdjust && (
               <button
                 onClick={openNewAdjust}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-[#EEEDF5] dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-semibold text-[#1B1B1F] dark:text-white hover:border-[#7C6EF0] hover:text-[#7C6EF0] transition-colors shadow-xs cursor-pointer"
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors shadow-xs cursor-pointer"
               >
-                <Scale className="w-4 h-4 stroke-[1.8] text-[#8B8B99] dark:text-slate-400" />
+                <Scale className="w-4 h-4 stroke-[1.8] text-slate-400" />
                 <span>{t('adjustStockBtn')}</span>
               </button>
             )}
             <button
               onClick={openNewStockIn}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#7C6EF0] text-white text-sm font-semibold hover:bg-[#6C5CE7] transition-all shadow-sm shadow-[#7C6EF0]/20 cursor-pointer"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#0B3333] hover:bg-[#0B3333]/90 text-white text-xs sm:text-sm font-semibold transition-colors shadow-xs cursor-pointer"
             >
               <Plus className="w-4 h-4 stroke-[2.5]" />
               <span>{t('stockInBtn')}</span>
@@ -572,92 +671,175 @@ export default function InventoryPage() {
 
         {/* Top Metric Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 sm:gap-4">
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('kpiOnHand')}</span>
-              <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center">
-                <Boxes className="w-4 h-4" />
+          {/* Card 1: TOTAL ON HAND (Core Metric) */}
+          <div className={`bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-col justify-between ${
+            !showAllMetrics ? 'sm:col-span-2 lg:col-span-1' : ''
+          }`}>
+            <div>
+              <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">{t('kpiOnHand')}</span>
+            </div>
+            <div className="mt-2">
+              <p className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100 tabular-nums font-sans">
+                {invMetrics.onHand.value.toLocaleString('id-ID')}
+              </p>
+              <div className="flex items-center gap-1.5 mt-2">
+                <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold ${
+                  invMetrics.onHand.isPositive
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
+                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
+                }`}>
+                  {invMetrics.onHand.isPositive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                  {invMetrics.onHand.change}
+                </span>
+                <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                  {language === 'id' ? '7 hari terakhir' : 'Last 7 days'}
+                </span>
               </div>
             </div>
-            <p className="text-2xl font-bold text-slate-900 dark:text-slate-100 mt-2">
-              {stats ? stats.total_on_hand.toLocaleString() : '—'}
-            </p>
-            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
-              {language === 'id' ? 'Unit fisik di semua gudang' : 'Physical units across hubs'}
-            </p>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('kpiAvailable')}</span>
-              <div className="w-8 h-8 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-                <CheckCircle2 className="w-4 h-4" />
+          {/* Card 2: AVAILABLE STOCK */}
+          <div className={`bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-col justify-between ${
+            !showAllMetrics ? 'hidden lg:flex' : 'flex'
+          }`}>
+            <div>
+              <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">{t('kpiAvailable')}</span>
+            </div>
+            <div className="mt-2">
+              <p className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100 tabular-nums font-sans">
+                {invMetrics.available.value.toLocaleString('id-ID')}
+              </p>
+              <div className="flex items-center gap-1.5 mt-2">
+                <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold ${
+                  invMetrics.available.isPositive
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
+                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
+                }`}>
+                  {invMetrics.available.isPositive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                  {invMetrics.available.change}
+                </span>
+                <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                  {language === 'id' ? '7 hari terakhir' : 'Last 7 days'}
+                </span>
               </div>
             </div>
-            <p className="text-2xl font-bold text-slate-900 dark:text-slate-100 mt-2">
-              {stats ? stats.total_available.toLocaleString() : '—'}
-            </p>
-            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
-              {language === 'id' ? 'Siap dialokasikan' : 'Ready for fulfillment'}
-            </p>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('kpiReserved')}</span>
-              <div className="w-8 h-8 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 flex items-center justify-center">
-                <ShieldAlert className="w-4 h-4" />
+          {/* Card 3: RESERVED STOCK */}
+          <div className={`bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-col justify-between ${
+            !showAllMetrics ? 'hidden lg:flex' : 'flex'
+          }`}>
+            <div>
+              <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">{t('kpiReserved')}</span>
+            </div>
+            <div className="mt-2">
+              <p className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100 tabular-nums font-sans">
+                {invMetrics.reserved.value.toLocaleString('id-ID')}
+              </p>
+              <div className="flex items-center gap-1.5 mt-2">
+                <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold ${
+                  invMetrics.reserved.isPositive
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
+                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
+                }`}>
+                  {invMetrics.reserved.isPositive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                  {invMetrics.reserved.change}
+                </span>
+                <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                  {language === 'id' ? '7 hari terakhir' : 'Last 7 days'}
+                </span>
               </div>
             </div>
-            <p className="text-2xl font-bold text-slate-900 dark:text-slate-100 mt-2">
-              {stats ? stats.total_reserved.toLocaleString() : '—'}
-            </p>
-            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
-              {language === 'id' ? 'Ditahan untuk pesanan' : 'Held for active orders'}
-            </p>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('kpiLowStock')}</span>
-              <div className="w-8 h-8 rounded-full bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 flex items-center justify-center">
-                <AlertTriangle className="w-4 h-4" />
+          {/* Card 4: LOW STOCK */}
+          <div className={`bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-col justify-between ${
+            !showAllMetrics ? 'hidden lg:flex' : 'flex'
+          }`}>
+            <div>
+              <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">{t('kpiLowStock')}</span>
+            </div>
+            <div className="mt-2">
+              <p className={`text-2xl font-extrabold tracking-tight tabular-nums font-sans ${
+                invMetrics.lowStock.value > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-slate-100'
+              }`}>
+                {invMetrics.lowStock.value.toLocaleString('id-ID')}
+              </p>
+              <div className="flex items-center gap-1.5 mt-2">
+                <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold ${
+                  invMetrics.lowStock.isPositive
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
+                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
+                }`}>
+                  {invMetrics.lowStock.isPositive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                  {invMetrics.lowStock.change}
+                </span>
+                <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                  {language === 'id' ? '7 hari terakhir' : 'Last 7 days'}
+                </span>
               </div>
             </div>
-            <p className="text-2xl font-bold text-slate-900 dark:text-slate-100 mt-2">
-              {stats ? stats.low_stock_items_count : '—'}
-            </p>
-            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
-              {language === 'id' ? 'Mendekati batas aman' : 'At or below safety min'}
-            </p>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm col-span-2 md:col-span-1">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('kpiMutationsToday')}</span>
-              <div className="w-8 h-8 rounded-full bg-[#F4F3FF] dark:bg-[#7C6EF0]/15 text-[#7C6EF0] dark:text-[#A594FD] flex items-center justify-center">
-                <History className="w-4 h-4" />
+          {/* Card 5: MUTATIONS TODAY */}
+          <div className={`bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-col justify-between ${
+            !showAllMetrics ? 'hidden lg:flex' : 'col-span-1 sm:col-span-2 md:col-span-1 flex'
+          }`}>
+            <div>
+              <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">{t('kpiMutationsToday')}</span>
+            </div>
+            <div className="mt-2">
+              <p className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100 tabular-nums font-sans">
+                {invMetrics.mutations.value.toLocaleString('id-ID')}
+              </p>
+              <div className="flex items-center gap-1.5 mt-2">
+                <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold ${
+                  invMetrics.mutations.isPositive
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
+                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
+                }`}>
+                  {invMetrics.mutations.isPositive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                  {invMetrics.mutations.change}
+                </span>
+                <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                  {language === 'id' ? '7 hari terakhir' : 'Last 7 days'}
+                </span>
               </div>
             </div>
-            <p className="text-2xl font-bold text-slate-900 dark:text-slate-100 mt-2">
-              {stats ? stats.movements_today : '—'}
-            </p>
-            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
-              {language === 'id' ? 'Transaksi log audit' : 'Audit log transactions'}
-            </p>
           </div>
         </div>
 
+        {/* Responsive Toggle for Metric Cards */}
+        <div className="lg:hidden">
+          <button
+            type="button"
+            onClick={() => setShowAllMetrics((prev) => !prev)}
+            aria-expanded={showAllMetrics}
+            className="w-full py-2.5 px-4 rounded-xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60 shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            <span>
+              {showAllMetrics
+                ? (language === 'id' ? 'Sembunyikan metrik' : 'Show less metrics')
+                : (language === 'id' ? 'Lihat 4 metrik lainnya' : 'Show 4 more metrics')}
+            </span>
+            {showAllMetrics ? (
+              <ChevronUp className="w-3.5 h-3.5 stroke-[2]" />
+            ) : (
+              <ChevronDown className="w-3.5 h-3.5 stroke-[2]" />
+            )}
+          </button>
+        </div>
+
         {/* Tabs and Controls */}
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-          <div className="border-b border-slate-200 dark:border-slate-800 px-6 pt-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-xs overflow-hidden">
+          <div className="border-b border-slate-200/80 dark:border-slate-800 px-6 pt-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             {/* Tab navigation */}
             <div className="flex items-center gap-6">
               <button
                 onClick={() => setActiveTab('balances')}
                 className={`pb-4 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 ${
                   activeTab === 'balances'
-                    ? 'border-[#7C6EF0] text-[#7C6EF0] dark:border-[#9B8DFC] dark:text-[#9B8DFC]'
+                    ? 'border-[#0B3333] text-[#0B3333] dark:border-emerald-400 dark:text-emerald-400'
                     : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
                 }`}
               >
@@ -668,7 +850,7 @@ export default function InventoryPage() {
                 onClick={() => setActiveTab('ledger')}
                 className={`pb-4 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 ${
                   activeTab === 'ledger'
-                    ? 'border-[#7C6EF0] text-[#7C6EF0] dark:border-[#9B8DFC] dark:text-[#9B8DFC]'
+                    ? 'border-[#0B3333] text-[#0B3333] dark:border-emerald-400 dark:text-emerald-400'
                     : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
                 }`}
               >
@@ -685,7 +867,7 @@ export default function InventoryPage() {
                   fetchStats();
                   if (activeTab === 'ledger') fetchMovements();
                 }}
-                className="p-2 rounded-full border border-[#EEEDF5] dark:border-slate-700 bg-white dark:bg-slate-800 text-[#8B8B99] dark:text-slate-400 hover:text-[#7C6EF0] hover:border-[#7C6EF0] transition-colors shadow-xs cursor-pointer"
+                className="p-2 rounded-xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 hover:text-[#0B3333] hover:border-[#0B3333] transition-colors shadow-xs cursor-pointer"
                 title="Refresh data"
               >
                 <RefreshCw className="w-3.5 h-3.5 stroke-[1.8]" />
@@ -777,7 +959,7 @@ export default function InventoryPage() {
                   </p>
                   <button
                     onClick={openNewStockIn}
-                    className="mt-4 inline-flex items-center px-3 py-1.5 text-xs font-semibold rounded-lg bg-[#7C6EF0] text-white hover:bg-[#6C5CE7] transition-colors"
+                    className="mt-4 inline-flex items-center px-3.5 py-2 text-xs font-medium rounded-xl bg-[#0B3333] text-white hover:bg-[#0B3333]/90 transition-colors shadow-xs"
                   >
                     <Plus className="w-3.5 h-3.5 mr-1" />
                     {t('recordFirstStock')}
@@ -971,7 +1153,7 @@ export default function InventoryPage() {
                               </span>
                             )}
                             {mov.movement_type === 'adjustment' && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/50">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-[#0B3333]/10 dark:bg-[#0B3333]/20 text-[#0B3333] dark:text-[#2dd4bf] border border-[#0B3333]/20">
                                 <Scale className="w-3 h-3 mr-1" />
                                 Adjustment
                               </span>
@@ -1075,7 +1257,7 @@ export default function InventoryPage() {
                   <select
                     value={formWhId}
                     onChange={(e) => setFormWhId(e.target.value)}
-                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     required
                   >
                     {warehouses.map((wh) => (
@@ -1091,7 +1273,7 @@ export default function InventoryPage() {
                   <select
                     value={formLocId}
                     onChange={(e) => setFormLocId(e.target.value)}
-                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     required
                   >
                     {currentWhLocations.length === 0 ? (
@@ -1112,7 +1294,7 @@ export default function InventoryPage() {
 
                   {/* Real-time Bin Capacity Indicator */}
                   {selectedLocationObj && selectedLocCapacity > 0 && (
-                    <div className="mt-2 p-3 rounded-xl border border-[#EEEDF5] dark:border-slate-700/80 bg-slate-50 dark:bg-slate-800/60 text-xs space-y-1.5">
+                    <div className="mt-2 p-3 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50 dark:bg-slate-800/60 text-xs space-y-1.5">
                       <div className="flex items-center justify-between">
                         <span className="text-slate-600 dark:text-slate-400 font-medium">
                           {language === 'id' ? 'Kapasitas Fisik Rak' : 'Bin Physical Capacity'}:
@@ -1152,7 +1334,7 @@ export default function InventoryPage() {
                       setFormProdId(e.target.value);
                       setFormVariantId('');
                     }}
-                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     required
                   >
                     {products.map((prod) => (
@@ -1171,7 +1353,7 @@ export default function InventoryPage() {
                     <select
                       value={formVariantId}
                       onChange={(e) => setFormVariantId(e.target.value)}
-                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     >
                       <option value="">{language === 'id' ? 'Produk Utama / Standar' : 'Standard / Base Product'}</option>
                       {selectedProductObj.variants.map((v) => (
@@ -1198,7 +1380,7 @@ export default function InventoryPage() {
                       className={`w-full h-10 px-3.5 bg-white dark:bg-slate-800 border rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 font-mono transition-colors ${
                         selectedLocCapacity > 0 && Number(formQuantity) > selectedLocAvailable
                           ? 'border-rose-500 focus:ring-rose-500'
-                          : 'border-[#EEEDF5] dark:border-slate-700 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0]'
+                          : 'border-slate-200 dark:border-slate-700 focus:ring-[#0B3333]/20 focus:border-[#0B3333]'
                       }`}
                       required
                     />
@@ -1217,7 +1399,7 @@ export default function InventoryPage() {
                     <select
                       value={formRefType}
                       onChange={(e) => setFormRefType(e.target.value)}
-                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     >
                       <option value="po">Purchase Order (PO)</option>
                       <option value="return">{language === 'id' ? 'Retur Pelanggan' : 'Customer Return'}</option>
@@ -1237,7 +1419,7 @@ export default function InventoryPage() {
                       placeholder="e.g. PO-2026-001"
                       value={formRefId}
                       onChange={(e) => setFormRefId(e.target.value)}
-                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] font-mono text-xs transition-colors"
+                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] font-mono text-xs transition-colors"
                     />
                   </div>
                   <div>
@@ -1249,7 +1431,7 @@ export default function InventoryPage() {
                       placeholder={language === 'id' ? 'contoh: Kiriman truk ekspedisi' : 'e.g. Delivered by truck'}
                       value={formNotes}
                       onChange={(e) => setFormNotes(e.target.value)}
-                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] text-xs transition-colors"
+                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] text-xs transition-colors"
                     />
                   </div>
                 </div>
@@ -1258,14 +1440,14 @@ export default function InventoryPage() {
                   <button
                     type="button"
                     onClick={() => setShowStockInModal(false)}
-                    className="px-5 py-2.5 text-sm font-semibold rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                    className="px-4 py-2 text-sm font-medium rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                   >
                     {t('cancel')}
                   </button>
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-[#7C6EF0] hover:bg-[#6C5CE7] text-white font-semibold text-sm transition-all shadow-sm shadow-[#7C6EF0]/20 cursor-pointer disabled:opacity-50"
+                    className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#0B3333] hover:bg-[#0B3333]/90 text-white font-medium text-sm transition-all shadow-sm cursor-pointer disabled:opacity-50"
                   >
                     {isSubmitting ? (
                       <>
@@ -1315,7 +1497,7 @@ export default function InventoryPage() {
                   <select
                     value={formWhId}
                     onChange={(e) => setFormWhId(e.target.value)}
-                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     required
                   >
                     {warehouses.map((wh) => (
@@ -1331,7 +1513,7 @@ export default function InventoryPage() {
                   <select
                     value={formLocId}
                     onChange={(e) => setFormLocId(e.target.value)}
-                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     required
                   >
                     {currentWhLocations.map((loc) => (
@@ -1350,7 +1532,7 @@ export default function InventoryPage() {
                       setFormProdId(e.target.value);
                       setFormVariantId('');
                     }}
-                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     required
                   >
                     {products.map((prod) => (
@@ -1362,11 +1544,11 @@ export default function InventoryPage() {
                 </div>
 
                 {/* Real-time availability indicator badge */}
-                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-[#EEEDF5] dark:border-slate-700 flex items-center justify-between text-xs">
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs">
                   <span className="text-slate-600 dark:text-slate-400 font-medium">
                     {language === 'id' ? 'Stok Tersedia di Slot Ini:' : 'Current Stock at this Location:'}
                   </span>
-                  <span className="font-bold text-[#7C6EF0] dark:text-[#9B8FF3] font-mono">
+                  <span className="font-bold text-[#0B3333] dark:text-[#2dd4bf] font-mono">
                     {maxAvailableForSelected !== null
                       ? (language === 'id' ? `${maxAvailableForSelected} unit tersedia` : `${maxAvailableForSelected} available`)
                       : (language === 'id' ? 'Belum ada stok' : 'Not stocked')}
@@ -1383,7 +1565,7 @@ export default function InventoryPage() {
                       placeholder="e.g. 5"
                       value={formQuantity}
                       onChange={(e) => setFormQuantity(e.target.value === '' ? '' : Number(e.target.value))}
-                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] font-mono transition-colors"
+                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] font-mono transition-colors"
                       required
                     />
                   </div>
@@ -1394,7 +1576,7 @@ export default function InventoryPage() {
                     <select
                       value={formRefType}
                       onChange={(e) => setFormRefType(e.target.value)}
-                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     >
                       <option value="so">{language === 'id' ? 'Pesanan Penjualan (SO)' : 'Sales Order (SO)'}</option>
                       <option value="damaged">{language === 'id' ? 'Barang Rusak (Write-off)' : 'Damaged Goods Write-off'}</option>
@@ -1414,7 +1596,7 @@ export default function InventoryPage() {
                       placeholder="e.g. SO-2026-042"
                       value={formRefId}
                       onChange={(e) => setFormRefId(e.target.value)}
-                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] font-mono text-xs transition-colors"
+                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] font-mono text-xs transition-colors"
                     />
                   </div>
                   <div>
@@ -1426,7 +1608,7 @@ export default function InventoryPage() {
                       placeholder={language === 'id' ? 'contoh: Pengiriman ke pelanggan' : 'e.g. Customer delivery'}
                       value={formNotes}
                       onChange={(e) => setFormNotes(e.target.value)}
-                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] text-xs transition-colors"
+                      className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] text-xs transition-colors"
                     />
                   </div>
                 </div>
@@ -1435,14 +1617,14 @@ export default function InventoryPage() {
                   <button
                     type="button"
                     onClick={() => setShowStockOutModal(false)}
-                    className="px-5 py-2.5 text-sm font-semibold rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                    className="px-4 py-2 text-sm font-medium rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                   >
                     {t('cancel')}
                   </button>
                   <button
                     type="submit"
                     disabled={isSubmitting || (maxAvailableForSelected !== null && maxAvailableForSelected <= 0)}
-                    className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-[#7C6EF0] hover:bg-[#6C5CE7] text-white font-semibold text-sm transition-all shadow-sm shadow-[#7C6EF0]/20 cursor-pointer disabled:opacity-50"
+                    className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#0B3333] hover:bg-[#0B3333]/90 text-white font-medium text-sm transition-all shadow-sm cursor-pointer disabled:opacity-50"
                   >
                     {isSubmitting ? (
                       <>
@@ -1492,7 +1674,7 @@ export default function InventoryPage() {
                   <select
                     value={formWhId}
                     onChange={(e) => setFormWhId(e.target.value)}
-                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     required
                   >
                     {warehouses.map((wh) => (
@@ -1508,7 +1690,7 @@ export default function InventoryPage() {
                   <select
                     value={formLocId}
                     onChange={(e) => setFormLocId(e.target.value)}
-                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     required
                   >
                     {currentWhLocations.map((loc) => (
@@ -1520,11 +1702,11 @@ export default function InventoryPage() {
 
                   {/* Real-time Bin Capacity Indicator for Adjustment */}
                   {selectedLocationObj && selectedLocCapacity > 0 && (
-                    <div className="mt-2 p-3 rounded-xl border border-[#EEEDF5] dark:border-slate-700/80 bg-slate-50 dark:bg-slate-800/60 text-xs flex justify-between items-center">
+                    <div className="mt-2 p-3 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50 dark:bg-slate-800/60 text-xs flex justify-between items-center">
                       <span className="text-slate-600 dark:text-slate-400 font-medium">
                         {language === 'id' ? 'Kapasitas Maksimal Rak' : 'Bin Maximum Capacity'}:
                       </span>
-                      <span className="font-semibold font-mono text-[#7C6EF0] dark:text-[#9B8FF3]">
+                      <span className="font-semibold font-mono text-[#0B3333] dark:text-[#2dd4bf]">
                         {selectedLocCapacity} pcs
                       </span>
                     </div>
@@ -1539,7 +1721,7 @@ export default function InventoryPage() {
                       setFormProdId(e.target.value);
                       setFormVariantId('');
                     }}
-                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     required
                   >
                     {products.map((prod) => (
@@ -1551,7 +1733,7 @@ export default function InventoryPage() {
                 </div>
 
                 {/* Real-time Delta Calculator Display */}
-                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-[#EEEDF5] dark:border-slate-700 text-xs space-y-1.5">
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 text-xs space-y-1.5">
                   <div className="flex justify-between text-slate-700 dark:text-slate-300">
                     <span>{language === 'id' ? 'Saldo Sistem Saat Ini:' : 'Current System Balance:'}</span>
                     <span className="font-bold font-mono text-slate-900 dark:text-white">{currentOnHandForAdjust} {language === 'id' ? 'unit' : 'units'}</span>
@@ -1587,7 +1769,7 @@ export default function InventoryPage() {
                     className={`w-full h-10 px-3.5 bg-white dark:bg-slate-800 border rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 font-mono transition-colors ${
                       selectedLocCapacity > 0 && Number(formActualQty) > selectedLocCapacity
                         ? 'border-rose-500 focus:ring-rose-500'
-                        : 'border-[#EEEDF5] dark:border-slate-700 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0]'
+                        : 'border-slate-200 dark:border-slate-700 focus:ring-[#0B3333]/20 focus:border-[#0B3333]'
                     }`}
                     required
                   />
@@ -1612,7 +1794,7 @@ export default function InventoryPage() {
                     placeholder={language === 'id' ? 'contoh: Opname Semester I 2026, Kemasan rusak, Salah penempatan' : 'e.g. Stock Opname 2026, Damaged packaging, Found misplaced'}
                     value={formReason}
                     onChange={(e) => setFormReason(e.target.value)}
-                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] transition-colors"
+                    className="w-full h-10 px-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] transition-colors"
                     required
                   />
                 </div>
@@ -1626,7 +1808,7 @@ export default function InventoryPage() {
                     placeholder={language === 'id' ? 'Keterangan tambahan untuk audit manajer...' : 'Additional details for supervisor audit...'}
                     value={formNotes}
                     onChange={(e) => setFormNotes(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-[#EEEDF5] dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7C6EF0]/20 focus:border-[#7C6EF0] resize-none transition-colors"
+                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0B3333]/20 focus:border-[#0B3333] resize-none transition-colors"
                   />
                 </div>
 
@@ -1634,14 +1816,14 @@ export default function InventoryPage() {
                   <button
                     type="button"
                     onClick={() => setShowAdjustModal(false)}
-                    className="px-5 py-2.5 text-sm font-semibold rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                    className="px-4 py-2 text-sm font-medium rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                   >
                     {t('cancel')}
                   </button>
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-[#7C6EF0] hover:bg-[#6C5CE7] text-white font-semibold text-sm transition-all shadow-sm shadow-[#7C6EF0]/20 cursor-pointer disabled:opacity-50"
+                    className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#0B3333] hover:bg-[#0B3333]/90 text-white font-medium text-sm transition-all shadow-sm cursor-pointer disabled:opacity-50"
                   >
                     {isSubmitting ? (
                       <>

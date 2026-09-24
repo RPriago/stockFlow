@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useAuth } from './AuthContext';
+import { getAuthToken } from '@/lib/api';
 
 export interface DataChangeEvent {
   resource: string;
@@ -34,8 +35,10 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       if (!isMounted) return;
 
       const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api/v1';
-      const token = typeof window !== 'undefined' ? localStorage.getItem('stockflow_token') : null;
-      const url = `${baseUrl}/events?token=${encodeURIComponent(token || '')}`;
+      const token = getAuthToken();
+      const url = token
+        ? `${baseUrl}/events?token=${encodeURIComponent(token)}`
+        : `${baseUrl}/events`;
 
       try {
         eventSource = new EventSource(url, { withCredentials: true });

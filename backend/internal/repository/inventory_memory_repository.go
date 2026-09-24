@@ -8,8 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"stockflow-backend/internal/models"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 type memoryInventoryRepository struct {
@@ -271,6 +272,9 @@ func (r *memoryInventoryRepository) FindItems(ctx context.Context, params models
 	if params.Limit > 0 {
 		limit = params.Limit
 	}
+	if limit > 500 {
+		limit = 500
+	}
 	page := int64(1)
 	if params.Page > 0 {
 		page = params.Page
@@ -332,6 +336,9 @@ func (r *memoryInventoryRepository) FindMovements(ctx context.Context, params mo
 	if params.Limit > 0 {
 		limit = params.Limit
 	}
+	if limit > 500 {
+		limit = 500
+	}
 	page := int64(1)
 	if params.Page > 0 {
 		page = params.Page
@@ -374,4 +381,15 @@ func (r *memoryInventoryRepository) GetStats(ctx context.Context) (*models.Inven
 	}
 
 	return stats, nil
+}
+
+func (r *memoryInventoryRepository) GetTotalStockByWarehouse(ctx context.Context) (map[string]int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	stockByWh := make(map[string]int)
+	for _, it := range r.items {
+		stockByWh[it.WarehouseID.Hex()] += it.QuantityOnHand
+	}
+	return stockByWh, nil
 }

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { Role } from '@/types/auth';
@@ -117,11 +118,16 @@ export default function RegisterPage() {
       <div className="w-full lg:w-1/2 flex flex-col justify-between p-6 sm:p-12 xl:p-16 min-h-screen relative">
         {/* Top Header: Controls (Language & Theme) */}
         <div className="flex items-center justify-between w-full mb-6">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-bold tracking-wider uppercase text-slate-800 dark:text-slate-200">
-              Stock<span className="text-[#0B3333] dark:text-emerald-400">Flow</span>
-            </span>
-          </div>
+          <Link href="/" className="inline-flex items-center">
+            <Image
+              src="/djt_group.png"
+              alt="DJT Group"
+              width={115}
+              height={40}
+              className="h-8 w-auto object-contain invert dark:invert-0 transition-all duration-200"
+              priority
+            />
+          </Link>
 
           <div className="flex items-center gap-2">
             {/* Language Capsule */}

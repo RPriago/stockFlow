@@ -218,6 +218,9 @@ func (r *memoryPORepository) ListPOs(ctx context.Context, params models.POQueryP
 	if params.Limit > 0 {
 		limit = params.Limit
 	}
+	if limit > 500 {
+		limit = 500
+	}
 	page := int64(1)
 	if params.Page > 0 {
 		page = params.Page

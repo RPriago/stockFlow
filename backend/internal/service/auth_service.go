@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"stockflow-backend/internal/config"
@@ -16,6 +17,7 @@ import (
 var (
 	ErrInvalidCredentials = errors.New("invalid email or password")
 	ErrAccountInactive    = errors.New("user account is inactive")
+	ErrAccountLocked      = errors.New("too many failed login attempts, account temporarily locked for 15 minutes")
 	ErrInvalidRole        = errors.New("invalid user role")
 
 	// Pre-hashed dummy bcrypt string used to equalize timing for non-existent users,
@@ -34,37 +36,92 @@ type AuthService interface {
 	SeedInitialAdmin(ctx context.Context) error
 }
 
+type failedLoginEntry struct {
+	count       int
+	lastAttempt time.Time
+	lockedUntil time.Time
+}
+
 type authService struct {
-	userRepo repository.UserRepository
-	cfg      *config.Config
+	userRepo      repository.UserRepository
+	cfg           *config.Config
+	failedLogins  map[string]*failedLoginEntry
+	failedLoginMu sync.Mutex
 }
 
 func NewAuthService(userRepo repository.UserRepository, cfg *config.Config) AuthService {
 	return &authService{
-		userRepo: userRepo,
-		cfg:      cfg,
+		userRepo:     userRepo,
+		cfg:          cfg,
+		failedLogins: make(map[string]*failedLoginEntry),
 	}
 }
 
+func (s *authService) recordFailedAttempt(email string) {
+	s.failedLoginMu.Lock()
+	defer s.failedLoginMu.Unlock()
+
+	now := time.Now()
+	if len(s.failedLogins) >= 1000 {
+		for k, v := range s.failedLogins {
+			if (!v.lockedUntil.IsZero() && now.After(v.lockedUntil)) || now.Sub(v.lastAttempt) > 15*time.Minute {
+				delete(s.failedLogins, k)
+			}
+		}
+	}
+
+	entry, exists := s.failedLogins[email]
+	if !exists || (!entry.lockedUntil.IsZero() && now.After(entry.lockedUntil)) || now.Sub(entry.lastAttempt) > 15*time.Minute {
+		entry = &failedLoginEntry{}
+		s.failedLogins[email] = entry
+	}
+	entry.count++
+	entry.lastAttempt = now
+	if entry.count >= 5 {
+		entry.lockedUntil = now.Add(15 * time.Minute)
+	}
+}
+
+func (s *authService) resetFailedAttempts(email string) {
+	s.failedLoginMu.Lock()
+	defer s.failedLoginMu.Unlock()
+	delete(s.failedLogins, email)
+}
+
 func (s *authService) Login(ctx context.Context, req models.LoginRequest) (*models.User, string, time.Time, error) {
+	// SEC-005/009: Check if account is temporarily locked due to excessive failed attempts
+	s.failedLoginMu.Lock()
+	now := time.Now()
+	entry, exists := s.failedLogins[req.Email]
+	if exists && now.Before(entry.lockedUntil) {
+		s.failedLoginMu.Unlock()
+		return nil, "", time.Time{}, ErrAccountLocked
+	}
+	s.failedLoginMu.Unlock()
+
 	user, err := s.userRepo.FindByEmail(ctx, req.Email)
 	if err != nil {
 		if errors.Is(err, repository.ErrUserNotFound) {
 			// Defend against timing attacks / user enumeration: perform constant-time
 			// bcrypt comparison so response time does not leak account existence.
 			utils.CheckPasswordHash(req.Password, dummyHash)
+			s.recordFailedAttempt(req.Email)
 			return nil, "", time.Time{}, ErrInvalidCredentials
 		}
 		return nil, "", time.Time{}, err
 	}
 
 	if !user.IsActive {
+		s.recordFailedAttempt(req.Email)
 		return nil, "", time.Time{}, ErrAccountInactive
 	}
 
 	if !utils.CheckPasswordHash(req.Password, user.PasswordHash) {
+		s.recordFailedAttempt(req.Email)
 		return nil, "", time.Time{}, ErrInvalidCredentials
 	}
+
+	s.resetFailedAttempts(req.Email)
 
 	token, expiresAt, err := utils.GenerateJWT(user, s.cfg.JWTSecret, s.cfg.JWTExpiryHours)
 	if err != nil {

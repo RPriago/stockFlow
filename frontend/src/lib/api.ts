@@ -16,6 +16,17 @@ export class ApiError extends Error {
   }
 }
 
+let memoryToken: string | null = null;
+
+export const setAuthToken = (token: string | null) => {
+  memoryToken = token;
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem('stockflow_token');
+  }
+};
+
+export const getAuthToken = () => memoryToken;
+
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
   const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
 
@@ -25,12 +36,9 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     'X-Requested-With': 'XMLHttpRequest',
   };
 
-  // Attach Bearer token fallback for seamless cross-domain deployments (e.g. Vercel -> Render)
-  if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('stockflow_token');
-    if (token) {
-      defaultHeaders['Authorization'] = `Bearer ${token}`;
-    }
+  // SEC-003: Attach in-memory Bearer token fallback for cross-domain deployments without localStorage exposure
+  if (memoryToken) {
+    defaultHeaders['Authorization'] = `Bearer ${memoryToken}`;
   }
 
   const response = await fetch(url, {

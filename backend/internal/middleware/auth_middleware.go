@@ -6,9 +6,11 @@ import (
 
 	"stockflow-backend/internal/config"
 	"stockflow-backend/internal/models"
+	"stockflow-backend/internal/repository"
 	"stockflow-backend/internal/utils"
 
 	"github.com/gin-gonic/gin"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 const (
@@ -19,7 +21,11 @@ const (
 	ContextName   = "current_user_name"
 )
 
-func AuthMiddleware(cfg *config.Config) gin.HandlerFunc {
+func AuthMiddleware(cfg *config.Config, userRepos ...repository.UserRepository) gin.HandlerFunc {
+	var userRepo repository.UserRepository
+	if len(userRepos) > 0 {
+		userRepo = userRepos[0]
+	}
 	return func(c *gin.Context) {
 		var tokenString string
 
@@ -52,6 +58,22 @@ func AuthMiddleware(cfg *config.Config) gin.HandlerFunc {
 			utils.ErrorResponse(c, http.StatusUnauthorized, "Invalid or expired token", err.Error())
 			c.Abort()
 			return
+		}
+
+		// SEC-004: Token revocation check - ensure account is active and not deleted
+		if userRepo != nil {
+			userOID, err := primitive.ObjectIDFromHex(claims.UserID)
+			if err != nil {
+				utils.ErrorResponse(c, http.StatusUnauthorized, "Invalid user identifier in token", nil)
+				c.Abort()
+				return
+			}
+			user, err := userRepo.FindByID(c.Request.Context(), userOID)
+			if err != nil || user == nil || !user.IsActive {
+				utils.ErrorResponse(c, http.StatusUnauthorized, "User account is inactive or revoked", nil)
+				c.Abort()
+				return
+			}
 		}
 
 		c.Set(ContextUserID, claims.UserID)

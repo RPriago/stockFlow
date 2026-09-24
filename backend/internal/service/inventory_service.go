@@ -693,14 +693,10 @@ func (s *inventoryService) GetWarehouseCapacityAnalytics(ctx context.Context) (*
 		return nil, err
 	}
 
-	items, _, err := s.inventoryRepo.FindItems(ctx, models.InventoryQueryParam{Limit: 2000})
+	// PERF-002: Use database aggregation instead of fetching thousands of raw documents into memory
+	stockByWh, err := s.inventoryRepo.GetTotalStockByWarehouse(ctx)
 	if err != nil {
 		return nil, err
-	}
-
-	stockByWh := make(map[string]int)
-	for _, it := range items {
-		stockByWh[it.WarehouseID.Hex()] += it.QuantityOnHand
 	}
 
 	var totalCapacity int

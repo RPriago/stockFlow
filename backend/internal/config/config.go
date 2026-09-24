@@ -21,6 +21,7 @@ type Config struct {
 	InitialAdminPassword string
 	InitialAdminName     string
 	UseInMemoryDB        bool
+	TrustedProxies       string
 }
 
 func LoadConfig() *Config {
@@ -49,6 +50,7 @@ func LoadConfig() *Config {
 		InitialAdminPassword: getEnv("INITIAL_ADMIN_PASSWORD", "Admin123!"),
 		InitialAdminName:     getEnv("INITIAL_ADMIN_NAME", "System Super Admin"),
 		UseInMemoryDB:        useInMemoryDB,
+		TrustedProxies:       getEnv("TRUSTED_PROXIES", ""),
 	}
 }
 

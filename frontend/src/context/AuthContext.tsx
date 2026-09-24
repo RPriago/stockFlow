@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { User, Role, ApiResponse, LoginResult } from '@/types/auth';
-import { api, ApiError } from '@/lib/api';
+import { api, ApiError, setAuthToken } from '@/lib/api';
 
 interface AuthContextType {
   user: User | null;
@@ -30,11 +30,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (res.success && res.data) {
         setUser(res.data);
       } else {
-        if (typeof window !== 'undefined') localStorage.removeItem('stockflow_token');
+        setAuthToken(null);
         setUser(null);
       }
     } catch {
-      if (typeof window !== 'undefined') localStorage.removeItem('stockflow_token');
+      setAuthToken(null);
       setUser(null);
     } finally {
       setIsLoading(false);
@@ -50,9 +50,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const res = await api.post<LoginResult>('/auth/login', { email, password });
       if (res.success && res.data) {
-        if (res.data.token && typeof window !== 'undefined') {
-          localStorage.setItem('stockflow_token', res.data.token);
-        }
+        setAuthToken(res.data.token || null);
         setUser(res.data.user);
         router.push('/dashboard');
       }
@@ -68,9 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const res = await api.post<LoginResult>('/auth/register', { name, email, password, role });
       if (res.success && res.data) {
-        if (res.data.token && typeof window !== 'undefined') {
-          localStorage.setItem('stockflow_token', res.data.token);
-        }
+        setAuthToken(res.data.token || null);
         setUser(res.data.user);
         router.push('/dashboard');
       }
@@ -88,9 +84,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // Ignore error during logout
     } finally {
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('stockflow_token');
-      }
+      setAuthToken(null);
       setUser(null);
       setIsLoading(false);
       router.push('/login');

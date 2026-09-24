@@ -208,6 +208,7 @@ func (r *memorySORepository) ListSOs(ctx context.Context, params models.SOQueryP
 		return matched[i].CreatedAt.After(matched[j].CreatedAt)
 	})
 
+	limit := int64(20)
 	if params.Limit > 0 {
 		start := (params.Page - 1) * params.Limit
 		if start < 0 {
@@ -221,7 +222,28 @@ func (r *memorySORepository) ListSOs(ctx context.Context, params models.SOQueryP
 			end = int64(len(matched))
 		}
 		matched = matched[start:end]
+		limit = params.Limit
 	}
+	if limit > 500 {
+		limit = 500
+	}
+	page := int64(1)
+	if params.Page > 0 {
+		page = params.Page
+	}
+
+	start := (page - 1) * limit
+	if start < 0 {
+		start = 0
+	}
+	if start >= int64(len(matched)) {
+		return []models.SalesOrder{}, total, nil
+	}
+	end := start + limit
+	if end > int64(len(matched)) {
+		end = int64(len(matched))
+	}
+	matched = matched[start:end]
 
 	return matched, total, nil
 }

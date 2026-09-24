@@ -75,6 +75,13 @@ func (rl *RateLimiter) Allow(ip string) (bool, time.Duration) {
 	now := time.Now()
 	rec, exists := rl.records[ip]
 	if !exists || now.Sub(rec.windowStart) >= rl.window {
+		if len(rl.records) >= 5000 {
+			for k, v := range rl.records {
+				if now.Sub(v.windowStart) >= rl.window {
+					delete(rl.records, k)
+				}
+			}
+		}
 		rl.records[ip] = &ipRecord{
 			count:       1,
 			windowStart: now,

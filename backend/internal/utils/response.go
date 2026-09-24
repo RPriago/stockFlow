@@ -22,10 +22,14 @@ func SuccessResponse(c *gin.Context, statusCode int, message string, data interf
 }
 
 func ErrorResponse(c *gin.Context, statusCode int, message string, err interface{}) {
+	errPayload := err
+	if statusCode >= http.StatusInternalServerError && gin.Mode() == gin.ReleaseMode {
+		errPayload = nil
+	}
 	c.JSON(statusCode, APIResponse{
 		Success: false,
 		Message: message,
-		Error:   err,
+		Error:   errPayload,
 	})
 }
 
