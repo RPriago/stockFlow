@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +19,8 @@ var (
 	ErrInvalidCredentials = errors.New("invalid email or password")
 	ErrAccountInactive    = errors.New("user account is inactive")
 	ErrAccountLocked      = errors.New("too many failed login attempts, account temporarily locked for 15 minutes")
+	ErrIPBlocked          = errors.New("too many failed login attempts, network temporarily locked for 15 minutes")
+	ErrDeviceBlocked      = errors.New("too many failed login attempts, device temporarily locked for 15 minutes")
 	ErrInvalidRole        = errors.New("invalid user role")
 
 	// Pre-hashed dummy bcrypt string used to equalize timing for non-existent users,
@@ -26,7 +29,8 @@ var (
 )
 
 type AuthService interface {
-	Login(ctx context.Context, req models.LoginRequest) (*models.User, string, time.Time, error)
+	Login(ctx context.Context, req models.LoginRequest, clientIP, deviceID string) (*models.User, string, time.Time, error)
+	IsClientBlocked(clientIP, deviceID string) (bool, string, time.Duration)
 	Register(ctx context.Context, req models.RegisterRequest) (*models.User, error)
 	PublicRegister(ctx context.Context, req models.RegisterRequest) (*models.User, string, time.Time, error)
 	GetCurrentUser(ctx context.Context, userID primitive.ObjectID) (*models.User, error)
@@ -57,12 +61,12 @@ func NewAuthService(userRepo repository.UserRepository, cfg *config.Config) Auth
 	}
 }
 
-func (s *authService) recordFailedAttempt(email string) {
+func (s *authService) recordFailedAttempt(keys ...string) {
 	s.failedLoginMu.Lock()
 	defer s.failedLoginMu.Unlock()
 
 	now := time.Now()
-	if len(s.failedLogins) >= 1000 {
+	if len(s.failedLogins) >= 3000 {
 		for k, v := range s.failedLogins {
 			if (!v.lockedUntil.IsZero() && now.After(v.lockedUntil)) || now.Sub(v.lastAttempt) > 15*time.Minute {
 				delete(s.failedLogins, k)
@@ -70,30 +74,88 @@ func (s *authService) recordFailedAttempt(email string) {
 		}
 	}
 
-	entry, exists := s.failedLogins[email]
-	if !exists || (!entry.lockedUntil.IsZero() && now.After(entry.lockedUntil)) || now.Sub(entry.lastAttempt) > 15*time.Minute {
-		entry = &failedLoginEntry{}
-		s.failedLogins[email] = entry
-	}
-	entry.count++
-	entry.lastAttempt = now
-	if entry.count >= 5 {
-		entry.lockedUntil = now.Add(15 * time.Minute)
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		entry, exists := s.failedLogins[key]
+		if !exists || (!entry.lockedUntil.IsZero() && now.After(entry.lockedUntil)) || now.Sub(entry.lastAttempt) > 15*time.Minute {
+			entry = &failedLoginEntry{}
+			s.failedLogins[key] = entry
+		}
+		entry.count++
+		entry.lastAttempt = now
+		if entry.count >= 5 {
+			entry.lockedUntil = now.Add(15 * time.Minute)
+		}
 	}
 }
 
-func (s *authService) resetFailedAttempts(email string) {
+func (s *authService) resetFailedAttempts(keys ...string) {
 	s.failedLoginMu.Lock()
 	defer s.failedLoginMu.Unlock()
-	delete(s.failedLogins, email)
+	for _, key := range keys {
+		if key != "" {
+			delete(s.failedLogins, key)
+		}
+	}
 }
 
-func (s *authService) Login(ctx context.Context, req models.LoginRequest) (*models.User, string, time.Time, error) {
-	// SEC-005/009: Check if account is temporarily locked due to excessive failed attempts
+func (s *authService) IsClientBlocked(clientIP, deviceID string) (bool, string, time.Duration) {
+	s.failedLoginMu.Lock()
+	defer s.failedLoginMu.Unlock()
+
+	now := time.Now()
+	if clientIP != "" && clientIP != "unknown" {
+		ipKey := "ip:" + strings.TrimSpace(clientIP)
+		if entry, exists := s.failedLogins[ipKey]; exists && now.Before(entry.lockedUntil) {
+			return true, "network", entry.lockedUntil.Sub(now)
+		}
+	}
+
+	if deviceID != "" {
+		deviceKey := "device:" + strings.TrimSpace(deviceID)
+		if entry, exists := s.failedLogins[deviceKey]; exists && now.Before(entry.lockedUntil) {
+			return true, "device", entry.lockedUntil.Sub(now)
+		}
+	}
+
+	return false, "", 0
+}
+
+func (s *authService) Login(ctx context.Context, req models.LoginRequest, clientIP, deviceID string) (*models.User, string, time.Time, error) {
+	emailKey := "email:" + strings.ToLower(strings.TrimSpace(req.Email))
+	ipKey := ""
+	if clientIP != "" && clientIP != "unknown" {
+		ipKey = "ip:" + strings.TrimSpace(clientIP)
+	}
+	deviceKey := ""
+	if deviceID != "" {
+		deviceKey = "device:" + strings.TrimSpace(deviceID)
+	}
+
+	// SEC-005/009: Multi-layer Brute Force Defense (IP, Device, and Account Lockout)
 	s.failedLoginMu.Lock()
 	now := time.Now()
-	entry, exists := s.failedLogins[req.Email]
-	if exists && now.Before(entry.lockedUntil) {
+
+	// 1. IP-level defense: block network if IP triggered 5 failed attempts
+	if ipKey != "" {
+		if entry, exists := s.failedLogins[ipKey]; exists && now.Before(entry.lockedUntil) {
+			s.failedLoginMu.Unlock()
+			return nil, "", time.Time{}, ErrIPBlocked
+		}
+	}
+
+	// 2. Device-level defense: block device even if attacker rotates IP
+	if deviceKey != "" {
+		if entry, exists := s.failedLogins[deviceKey]; exists && now.Before(entry.lockedUntil) {
+			s.failedLoginMu.Unlock()
+			return nil, "", time.Time{}, ErrDeviceBlocked
+		}
+	}
+
+	// 3. Account-level defense: block specific account if targeted
+	if entry, exists := s.failedLogins[emailKey]; exists && now.Before(entry.lockedUntil) {
 		s.failedLoginMu.Unlock()
 		return nil, "", time.Time{}, ErrAccountLocked
 	}
@@ -105,23 +167,24 @@ func (s *authService) Login(ctx context.Context, req models.LoginRequest) (*mode
 			// Defend against timing attacks / user enumeration: perform constant-time
 			// bcrypt comparison so response time does not leak account existence.
 			utils.CheckPasswordHash(req.Password, dummyHash)
-			s.recordFailedAttempt(req.Email)
+			s.recordFailedAttempt(emailKey, ipKey, deviceKey)
 			return nil, "", time.Time{}, ErrInvalidCredentials
 		}
 		return nil, "", time.Time{}, err
 	}
 
 	if !user.IsActive {
-		s.recordFailedAttempt(req.Email)
+		s.recordFailedAttempt(emailKey, ipKey, deviceKey)
 		return nil, "", time.Time{}, ErrAccountInactive
 	}
 
 	if !utils.CheckPasswordHash(req.Password, user.PasswordHash) {
-		s.recordFailedAttempt(req.Email)
+		s.recordFailedAttempt(emailKey, ipKey, deviceKey)
 		return nil, "", time.Time{}, ErrInvalidCredentials
 	}
 
-	s.resetFailedAttempts(req.Email)
+	// Reset failure count on successful login for this account, IP, and device
+	s.resetFailedAttempts(emailKey, ipKey, deviceKey)
 
 	token, expiresAt, err := utils.GenerateJWT(user, s.cfg.JWTSecret, s.cfg.JWTExpiryHours)
 	if err != nil {

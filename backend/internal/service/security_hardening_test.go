@@ -104,7 +104,7 @@ func TestSecurity_UserEnumerationTimingDefense(t *testing.T) {
 	_, _, _, errNonExistent := authSvc.Login(ctx, models.LoginRequest{
 		Email:    "nonexistent@stockflow.test",
 		Password: "Password123!",
-	})
+	}, "192.168.1.10", "device-test-1")
 	if errNonExistent == nil || errNonExistent != ErrInvalidCredentials {
 		t.Errorf("expected ErrInvalidCredentials for non-existent user, got %v", errNonExistent)
 	}
@@ -113,7 +113,7 @@ func TestSecurity_UserEnumerationTimingDefense(t *testing.T) {
 	_, _, _, errWrongPassword := authSvc.Login(ctx, models.LoginRequest{
 		Email:    "existing@stockflow.test",
 		Password: "WrongPassword!",
-	})
+	}, "192.168.1.10", "device-test-1")
 	if errWrongPassword == nil || errWrongPassword != ErrInvalidCredentials {
 		t.Errorf("expected ErrInvalidCredentials for wrong password, got %v", errWrongPassword)
 	}
@@ -149,7 +149,7 @@ func TestSecurity_BruteForceAccountLockout(t *testing.T) {
 		_, _, _, errLogin := authSvc.Login(ctx, models.LoginRequest{
 			Email:    "target@stockflow.test",
 			Password: "WrongPassword!",
-		})
+		}, "", "")
 		if errLogin != ErrInvalidCredentials {
 			t.Fatalf("attempt %d: expected ErrInvalidCredentials, got %v", i, errLogin)
 		}
@@ -159,7 +159,7 @@ func TestSecurity_BruteForceAccountLockout(t *testing.T) {
 	_, _, _, err5 := authSvc.Login(ctx, models.LoginRequest{
 		Email:    "target@stockflow.test",
 		Password: "WrongPassword!",
-	})
+	}, "", "")
 	if err5 != ErrInvalidCredentials {
 		t.Fatalf("5th attempt: expected ErrInvalidCredentials, got %v", err5)
 	}
@@ -168,9 +168,111 @@ func TestSecurity_BruteForceAccountLockout(t *testing.T) {
 	_, _, _, errLocked := authSvc.Login(ctx, models.LoginRequest{
 		Email:    "target@stockflow.test",
 		Password: "CorrectPassword123!",
-	})
+	}, "", "")
 	if errLocked != ErrAccountLocked {
 		t.Fatalf("expected ErrAccountLocked after 5 failures, got %v", errLocked)
+	}
+}
+
+func TestSecurity_CrossAccountIPLockout(t *testing.T) {
+	ctx := context.Background()
+	userRepo := repository.NewUserMemoryRepository()
+	cfg := &config.Config{
+		JWTSecret:      "test-secret-key-32-characters-min!!",
+		JWTExpiryHours: 24,
+	}
+	authSvc := NewAuthService(userRepo, cfg)
+
+	// Register 6 different legitimate accounts
+	for i := 1; i <= 6; i++ {
+		_, err := authSvc.Register(ctx, models.RegisterRequest{
+			Name:     "Valid User",
+			Email:    "user" + string(rune('0'+i)) + "@stockflow.test",
+			Password: "ValidPassword123!",
+			Role:     models.RoleWarehouseStaff,
+		})
+		if err != nil {
+			t.Fatalf("failed to register user: %v", err)
+		}
+	}
+
+	attackerIP := "203.0.113.88"
+	attackerDevice := "device-attacker-pc"
+
+	// Attacker tries 5 different accounts with WRONG passwords from the same IP
+	for i := 1; i <= 5; i++ {
+		email := "user" + string(rune('0'+i)) + "@stockflow.test"
+		_, _, _, errLogin := authSvc.Login(ctx, models.LoginRequest{
+			Email:    email,
+			Password: "WrongPasswordGuess!",
+		}, attackerIP, attackerDevice)
+		if errLogin != ErrInvalidCredentials {
+			t.Fatalf("attempt %d: expected ErrInvalidCredentials, got %v", i, errLogin)
+		}
+	}
+
+	// Attacker now tries account 6 with the 100% CORRECT password from the same IP
+	_, _, _, errIPLocked := authSvc.Login(ctx, models.LoginRequest{
+		Email:    "user6@stockflow.test",
+		Password: "ValidPassword123!",
+	}, attackerIP, "device-random-spoofed")
+	if errIPLocked != ErrIPBlocked {
+		t.Fatalf("expected ErrIPBlocked after 5 IP failures even with valid credentials on a different account, got %v", errIPLocked)
+	}
+
+	// Verify IsClientBlocked returns true for the attacker IP
+	blocked, reason, _ := authSvc.IsClientBlocked(attackerIP, "new-device")
+	if !blocked || reason != "network" {
+		t.Fatalf("expected IsClientBlocked for IP to return (true, network), got (%v, %v)", blocked, reason)
+	}
+}
+
+func TestSecurity_CrossIPDeviceLockout(t *testing.T) {
+	ctx := context.Background()
+	userRepo := repository.NewUserMemoryRepository()
+	cfg := &config.Config{
+		JWTSecret:      "test-secret-key-32-characters-min!!",
+		JWTExpiryHours: 24,
+	}
+	authSvc := NewAuthService(userRepo, cfg)
+
+	_, err := authSvc.Register(ctx, models.RegisterRequest{
+		Name:     "Target Account",
+		Email:    "target_device@stockflow.test",
+		Password: "ValidPassword123!",
+		Role:     models.RoleWarehouseStaff,
+	})
+	if err != nil {
+		t.Fatalf("failed to register user: %v", err)
+	}
+
+	persistentDevice := "device-hardware-uuid-999"
+
+	// Attacker rotates IP 5 times using VPN/proxy, but same device ID
+	for i := 1; i <= 5; i++ {
+		rotatingIP := "198.51.100." + string(rune('0'+i))
+		_, _, _, errLogin := authSvc.Login(ctx, models.LoginRequest{
+			Email:    "target_device@stockflow.test",
+			Password: "WrongPassword!",
+		}, rotatingIP, persistentDevice)
+		if errLogin != ErrInvalidCredentials {
+			t.Fatalf("attempt %d: expected ErrInvalidCredentials, got %v", i, errLogin)
+		}
+	}
+
+	// Attacker on a brand new IP (IP 6) with CORRECT password on the same device
+	_, _, _, errDevLocked := authSvc.Login(ctx, models.LoginRequest{
+		Email:    "target_device@stockflow.test",
+		Password: "ValidPassword123!",
+	}, "198.51.100.99", persistentDevice)
+	if errDevLocked != ErrDeviceBlocked {
+		t.Fatalf("expected ErrDeviceBlocked after 5 device failures, got %v", errDevLocked)
+	}
+
+	// Verify IsClientBlocked returns true for the device
+	blocked, reason, _ := authSvc.IsClientBlocked("clean-new-ip", persistentDevice)
+	if !blocked || reason != "device" {
+		t.Fatalf("expected IsClientBlocked for Device to return (true, device), got (%v, %v)", blocked, reason)
 	}
 }
 
@@ -200,7 +302,7 @@ func TestSecurity_InactiveUserEnumerationDefense(t *testing.T) {
 	_, _, _, errInactive := authSvc.Login(ctx, models.LoginRequest{
 		Email:    "disabled@stockflow.test",
 		Password: "Password123!",
-	})
+	}, "10.0.0.1", "device-test-inactive")
 	if errInactive != ErrAccountInactive {
 		t.Fatalf("expected ErrAccountInactive, got %v", errInactive)
 	}

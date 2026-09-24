@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -36,8 +37,19 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	user, token, expiresAt, err := h.authService.Login(c.Request.Context(), req)
+	clientIP := utils.GetClientIP(c)
+	deviceID := utils.GetDeviceID(c)
+
+	user, token, expiresAt, err := h.authService.Login(c.Request.Context(), req, clientIP, deviceID)
 	if err != nil {
+		if errors.Is(err, service.ErrIPBlocked) {
+			utils.ErrorResponse(c, http.StatusTooManyRequests, "Access temporarily blocked due to too many failed attempts from this network. Try again in 15 minutes.", nil)
+			return
+		}
+		if errors.Is(err, service.ErrDeviceBlocked) {
+			utils.ErrorResponse(c, http.StatusTooManyRequests, "Access temporarily blocked due to too many failed attempts from this device. Try again in 15 minutes.", nil)
+			return
+		}
 		if errors.Is(err, service.ErrAccountLocked) {
 			utils.ErrorResponse(c, http.StatusTooManyRequests, "Account temporarily locked due to too many failed attempts. Try again in 15 minutes.", nil)
 			return
@@ -49,6 +61,9 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to authenticate", err.Error())
 		return
 	}
+
+	// Ensure device cookie is set for persistent device tracking
+	c.SetCookie("stockflow_device_id", deviceID, 365*24*3600, "/", h.cfg.CookieDomain, h.cfg.CookieSecure, false)
 
 	// Set HTTP-only Cookie (SameSite=None if HTTPS/Secure for cross-domain Vercel <-> Render, else Lax for localhost)
 	cookieMaxAge := h.cfg.JWTExpiryHours * 3600
@@ -168,6 +183,14 @@ func (h *AuthHandler) ListUsers(c *gin.Context) {
 }
 
 func (h *AuthHandler) PublicRegister(c *gin.Context) {
+	clientIP := utils.GetClientIP(c)
+	deviceID := utils.GetDeviceID(c)
+	if blocked, reason, retryAfter := h.authService.IsClientBlocked(clientIP, deviceID); blocked {
+		mins := int(retryAfter.Minutes()) + 1
+		utils.ErrorResponse(c, http.StatusTooManyRequests, fmt.Sprintf("Access temporarily blocked due to excessive failed login attempts from this %s. Try again in %d minutes.", reason, mins), nil)
+		return
+	}
+
 	var req models.RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		utils.ValidationErrorResponse(c, err)
@@ -187,6 +210,9 @@ func (h *AuthHandler) PublicRegister(c *gin.Context) {
 		utils.ErrorResponse(c, http.StatusBadRequest, err.Error(), nil)
 		return
 	}
+
+	// Ensure device cookie is set for persistent device tracking
+	c.SetCookie("stockflow_device_id", deviceID, 365*24*3600, "/", h.cfg.CookieDomain, h.cfg.CookieSecure, false)
 
 	utils.SuccessResponse(c, http.StatusCreated, "Registration successful", gin.H{
 		"user":       user.ToResponse(),

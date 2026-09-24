@@ -127,8 +127,15 @@ func main() {
 			log.Printf("Warning: failed to set trusted proxies: %v\n", err)
 		}
 	} else {
-		// In standalone/direct deployment, trust no upstream proxies so c.ClientIP() cannot be spoofed
-		_ = router.SetTrustedProxies(nil)
+		// In cloud deployments (Render, Docker, K8s), trust standard RFC1918 private CIDRs
+		// and loopback so reverse proxies pass the real client IP securely without spoofing.
+		_ = router.SetTrustedProxies([]string{
+			"127.0.0.1",
+			"::1",
+			"10.0.0.0/8",
+			"172.16.0.0/12",
+			"192.168.0.0/16",
+		})
 	}
 
 	// Security response headers (OWASP best practices: XSS, Clickjacking, MIME-sniffing, HSTS)
@@ -149,10 +156,11 @@ func main() {
 		})
 	})
 
-	// API v1 routes (protected by general API rate limiting and CSRF verification)
+	// API v1 routes (protected by client blocklist, general rate limiting, and CSRF verification)
 	authMid := middleware.AuthMiddleware(cfg, userRepo)
 
 	v1 := router.Group("/api/v1")
+	v1.Use(middleware.ClientBlockMiddleware(authService))
 	v1.Use(apiLimiter.Middleware())
 	v1.Use(middleware.CSRFProtectionMiddleware(cfg))
 	{

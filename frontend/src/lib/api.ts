@@ -27,13 +27,37 @@ export const setAuthToken = (token: string | null) => {
 
 export const getAuthToken = () => memoryToken;
 
+export function getOrCreateDeviceId(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    let id = localStorage.getItem('stockflow_device_id');
+    if (!id) {
+      const match = document.cookie.match(/(^|;)\s*stockflow_device_id=([^;]+)/);
+      if (match) {
+        id = decodeURIComponent(match[2]);
+      } else if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        id = crypto.randomUUID();
+      } else {
+        id = 'dev-' + Math.random().toString(36).substring(2) + Date.now().toString(36);
+      }
+      localStorage.setItem('stockflow_device_id', id);
+      document.cookie = `stockflow_device_id=${encodeURIComponent(id)}; path=/; max-age=31536000; SameSite=Lax`;
+    }
+    return id;
+  } catch {
+    return '';
+  }
+}
+
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
   const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
 
+  const deviceId = getOrCreateDeviceId();
   const defaultHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
     'X-Requested-With': 'XMLHttpRequest',
+    ...(deviceId ? { 'X-Device-ID': deviceId } : {}),
   };
 
   // SEC-003: Attach in-memory Bearer token fallback for cross-domain deployments without localStorage exposure
